@@ -158,6 +158,14 @@ shipped table.
 VerboseLog=1). The previous session's are kept as `*.prev.log`. The **Debug overlay** shows the weapon,
 magazine, state, spread, ADS and sprint values live.
 
+## Support
+
+[<img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" height="36" alt="Support PurpleDarkO on Ko-fi">](https://ko-fi.com/purpledarko)
+
+CODV is free and always will be. If you enjoy it, or the development series on YouTube, you can support
+PurpleDarkO on [Ko-fi](https://ko-fi.com/purpledarko). It is never required, and supporting unlocks nothing: every
+feature is in the public release for everyone.
+
 ## Uninstall
 
 With GTA V closed, remove these from its folder:
