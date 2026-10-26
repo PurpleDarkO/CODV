@@ -1,0 +1,9 @@
+[package]
+name = "codv-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "CODV core: Call of Duty-style weapon handling and movement rules for the GTA V player; host-agnostic and FFI-free"
+
+# No third-party crates: the runtime DLL runs inside GTA.
+[dependencies]

@@ -1,0 +1,24 @@
+{
+  "about": "CODV's settings for Modern Warfare 2's weapons (imported from the player's own MW2 at setup into <GTA>/CODV/mw2/weapons.json). Names are MW2's multiplayer weapon names.",
+  "loadout": ["m4_mp", "usp_mp"],
+  "damage_scale": 1.0,
+  "ammo_scale": 3.0,
+  "frags": 2,
+  "gta_by_base": {
+    "m4": "weapon_carbinerifle", "m16": "weapon_carbinerifle", "famas": "weapon_bullpuprifle", "fal": "weapon_specialcarbine",
+    "scar": "weapon_advancedrifle", "tavor": "weapon_bullpuprifle", "fn2000": "weapon_bullpuprifle", "masada": "weapon_carbinerifle",
+    "ak47": "weapon_assaultrifle", "mp5k": "weapon_smg", "ump45": "weapon_smg", "kriss": "weapon_assaultsmg",
+    "p90": "weapon_assaultsmg", "uzi": "weapon_microsmg", "tmp": "weapon_machinepistol", "pp2000": "weapon_machinepistol",
+    "glock": "weapon_appistol", "beretta393": "weapon_appistol", "usp": "weapon_pistol", "beretta": "weapon_pistol",
+    "deserteagle": "weapon_pistol50", "deserteaglegold": "weapon_pistol50", "coltanaconda": "weapon_revolver",
+    "rpd": "weapon_mg", "sa80": "weapon_mg", "mg4": "weapon_combatmg", "aug": "weapon_mg", "m240": "weapon_combatmg",
+    "cheytac": "weapon_sniperrifle", "barrett": "weapon_heavysniper", "wa2000": "weapon_marksmanrifle", "m21": "weapon_marksmanrifle",
+    "spas12": "weapon_pumpshotgun", "aa12": "weapon_assaultshotgun", "striker": "weapon_assaultshotgun", "m1014": "weapon_bullpupshotgun",
+    "ranger": "weapon_sawnoffshotgun", "model1887": "weapon_pumpshotgun",
+    "rpg": "weapon_rpg", "at4": "weapon_rpg", "stinger": "weapon_rpg", "javelin": "weapon_rpg", "m79": "weapon_grenadelauncher"
+  },
+  "gta_by_class": {
+    "0": "weapon_carbinerifle", "1": "weapon_sniperrifle", "2": "weapon_mg", "3": "weapon_smg", "4": "weapon_pumpshotgun", "5": "weapon_pistol",
+    "6": "weapon_grenadelauncher", "7": "weapon_rpg"
+  }
+}

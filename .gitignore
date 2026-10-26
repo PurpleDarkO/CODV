@@ -1,0 +1,45 @@
+# Builds
+build/
+target/
+**/target/
+out/
+dist/
+tools/bin/
+python/
+
+# Fetched sources and SDKs (tools/fetch-upstreams.ps1, tools/fetch-scripthookv.ps1)
+upstream/
+third_party/scripthookv/
+receipts/
+
+# Game data: never in this repository
+local/
+*.rpf
+*.ycd
+*.ydr
+*.ytd
+# Modern Warfare 2's files and what the setup imports from them
+*.ff
+*.iwd
+mw2/
+# A player's own settings (the template is tools/CodVLegacy.ini.template)
+CodVLegacy.ini
+
+# Logs and captures
+*.log
+*.dmp
+*.png
+*.jpg
+*.mp4
+
+# IDE / OS
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Python bytecode
+__pycache__/

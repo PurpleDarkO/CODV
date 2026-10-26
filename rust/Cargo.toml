@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = ["codv-core", "codv-engine", "codv-gtaworld", "codv-mw2data", "codv-runtime"]
+# The setup's GTA archive tool has its own workspace (it depends on upstream/rpf-archive-rs).
+exclude = ["codv-gtapack"]
+
+# The runtime runs inside GTA: unwind so panics are caught at the C ABI
+# instead of taking the game process down.
+[profile.release]
+lto = "thin"
+codegen-units = 8
+panic = "unwind"
+debug = "line-tables-only"

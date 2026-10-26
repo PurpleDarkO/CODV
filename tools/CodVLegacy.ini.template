@@ -1,0 +1,194 @@
+; CODV settings. Most are changed in game: press + (or numpad +, or Back + LB) for the
+; CODV menu; each change is saved here at once. Reinstalling keeps your values.
+[CodV]
+; CODV mode is switched on by picking "MW2" in GTA's weapon wheel (WheelItem) and on and off in game
+; with ToggleKey (keyboard) or ToggleChord (controller).
+; While it is on and a weapon from weapons.json is in your hands, CODV owns the trigger, reload,
+; weapon swap (Tab / LB / mouse wheel), quick melee (C / R3) and crouch (Ctrl / L3). GTA keeps
+; walking, aiming, the camera, vehicles and every other weapon.
+; StartEnabled: 1 starts every game session with CODV on; 0 (default) starts in plain GTA.
+StartEnabled=0
+; ToggleKey: Windows virtual-key code (0x79 = F10; 0 = controller only).
+ToggleKey=0x79
+; ToggleChord: XInput button mask held together (0x0220 = Back + RB; 0 = keyboard only).
+ToggleChord=0x0220
+; WheelItem: picking the "MW2" item in GTA's weapon wheel (installed by INSTALL.bat) turns the mode on (0: F10 only).
+WheelItem=1
+; ModeBanner: show "CODV ON / OFF" and click when the mode toggles (debug; 0 = silent, default).
+ModeBanner=0
+; Primary / Secondary: weapon index in weapons.json for the two swap slots (-1 = its "loadout").
+Primary=-1
+Secondary=-1
+; With your MW2 imported (the menu sets these): Mw2Primary / Mw2Secondary pick any of MW2's base guns for the two
+; slots (index in the menu's list; -1 = data/mw2.json's loadout). AmmoScale multiplies the spare rounds (MW2 = 1).
+; Frags: frag grenades carried (G / RB: hold to cook, release to throw).
+Mw2Primary=-1
+Mw2Secondary=-1
+AmmoScale=3
+Frags=2
+; JumpHeight: MW2's jump in IW4 units (MW2 = 39, about 1 m; 20..80). A little higher helps climbing.
+JumpHeight=45
+; SprintTime: how long a sprint lasts in seconds, before the weapon's own scale (MW2 = 4; 1..16).
+SprintTime=8
+; SprintRecharge: how fast the sprint meter refills, over MW2's (1.0 = MW2: a second's sprint back in a
+; second; 1.0..4.0).
+SprintRecharge=1.3
+; GiveLoadout: give the two loadout weapons (with ammo) when CODV is switched on, if you lack them.
+GiveLoadout=1
+; RecoilScale: multiplies every weapon's kick, 0.25 .. 2.
+RecoilScale=1
+; FireMode: 0 = CODV bullets (CODV's timing, spread and range damage; GTA draws impacts and blood),
+;           1 = GTA's own trigger at CODV's timing and aim point (GTA's damage and muzzle flash).
+FireMode=0
+; RegenHealth: health comes back after 5 s without damage, Call of Duty style.
+RegenHealth=1
+; QuickJump: replaces GTA's jump with a short, fast hop.
+QuickJump=0
+; ForceFirstPerson: keep the on-foot camera in first person while CODV drives the player.
+ForceFirstPerson=1
+; HUD pieces.
+Crosshair=1
+Hitmarker=1
+HitSounds=1
+AmmoCounter=1
+DamageFlash=1
+; InMissions: stay active while a story mission runs.
+InMissions=1
+; Debug: runtime status at the top left, and the MW2 collision's ground under the
+; player next to GTA's (they should agree). VerboseLog: state changes in CodVRuntime.log.
+Debug=0
+VerboseLog=0
+; MenuChord: XInput button mask that opens the menu (0x0120 = Back + LB; 0 = keyboard only).
+MenuChord=0x0120
+; MenuKey: Windows virtual-key code that opens the menu (0xBB = the = / + key, numpad + too; 0xC0 = `).
+MenuKey=0xBB
+; NumberKeys: under MW2, key 1 takes out the primary, key 2 the secondary, key 3 the sniper rifle and
+; key 5 the launcher (a random RPG-7, AT4, Stinger, Javelin or Thumper), CS-style (0: off). The mouse
+; wheel / Tab / pad Y cycle through all four.
+; G throws a frag (hold to cook), F (a tap) is the knife / melee, C flips the third-person camera.
+; F is only the knife under MW2: it never enters a vehicle (switch the mode off to drive; a pad's Y still
+; enters) and holding it does nothing more; walk into a ladder to take it. In a vehicle F gets out as in GTA.
+NumberKeys=1
+; RandomLoadout: a random MW2 primary (assault rifle, SMG, LMG, sniper) and secondary (shotgun, machine pistol,
+; handgun) each time the mode is switched on (0: Mw2Primary / Mw2Secondary).
+RandomLoadout=1
+; WeaponSets: three different random guns behind each number key, rolled anew at each switch-on: key 1 three
+; primaries (assault rifles, SMGs, LMGs), key 2 three secondaries (shotguns, machine pistols, handguns), key 3
+; three sniper rifles, key 5 three launchers. The same key again takes the group's next gun; another key its
+; group's last one. Each gun keeps its own rounds. 0: one gun per key (RandomLoadout above).
+WeaponSets=1
+; Mw2Missiles: a locked Stinger or Javelin flies CODV's own missile: about 3 km of flight (GTA's rockets go off
+; after a few hundred metres) and MW2's proximity fuse near its target, so aircraft crossing the sky can be shot
+; down; the Stinger locks on up to 2500 m. The RPG-7, the AT4 and unlocked shots fire GTA's own rocket (its look,
+; trail and sound). 0: GTA's rocket for every shot, as before.
+Mw2Missiles=1
+; StrictVersion: 1 refuses any GTA build other than the tested {GTA_VERSION}.
+StrictVersion=0
+; Runtime: 0 skips loading CodVRuntime.dll (troubleshooting).
+Runtime=1
+; LiveCollision: read GTA's loaded collision (the physics level) for the MW2 player's world.
+LiveCollision=1
+; MW2Movement: with the mode on and on foot, Modern Warfare 2's movement moves you
+; (WASD / left stick, Shift sprint, Space jump, Ctrl tap crouch / hold prone).
+; With MW2 imported by the setup, MW2's weapons too (R reload, wheel / Tab switch,
+; C melee; loadout in CODV\mw2.json).
+; 0: GTA's own movement with the CODV gunplay.
+MW2Movement=1
+; MouseSensitivity: MW2 mouse look (also in the menu). PadLookSpeed: right stick speed scale.
+MouseSensitivity=1.0
+PadLookSpeed=1.0
+InvertLook=0
+; Fov: MW2's cg_fov (65 is MW2's default; widened for wide screens).
+Fov=65
+; ShowBody: draw your own GTA ped and gun under MW2 movement (the MW2 view model replaces them).
+ShowBody=0
+; Viewmodel: MW2's first-person arms and gun, imported from your MW2 by INSTALL.bat (0: off).
+Viewmodel=1
+; BodyPose: your GTA ped moves with MW2's third-person animations while MW2 drives you (0: GTA's).
+; BodyInFirstPerson: also in first person (MW2 shows no body there, so off by default).
+BodyPose=1
+BodyInFirstPerson=0
+; Mw2Hud: MW2's own HUD from your MW2 (weapon bar with the rounds, spare ammo and weapon name, hit marker,
+; damage direction arrows, grenade indicator, Reload / Low Ammo warnings); 0: CODV's simple HUD.
+Mw2Hud=1
+; Killstreaks (F5c): MW2's killstreaks from your MW2. Only hostile kills count (police, military,
+; anyone fighting you); civilians neither add nor reset. Dying or switching the mode off restarts
+; the count; earned rewards wait until used (a death loses them unless KeepKillstreaksOnDeath=1,
+; MW2's rule). Use the top one with 4 (pad: D-pad right). Off in story missions, and they never
+; change your wanted level.
+; AllKillstreaks=1 (CODV's default): every killstreak comes at its kill count in one life, from the UAV
+; to the Tactical Nuke. 0: only the three picks below (MW2's rule).
+; SpacedKillstreaks=1 (CODV's default): one reward per kill count, the gaps widening:
+;   UAV 3, Care Package 6, Predator Missile 9, Sentry Gun 12, Precision Airstrike 15, Attack Helicopter 18,
+;   AC-130 22, Chopper Gunner 26, EMP 30, Tactical Nuke 35. 0: MW2's counts (below; EmpKills applies).
+; Killstreak1..3, the three picks (MW2's kill counts):
+;   0 off, 1 UAV (3), 2 EMP (15), 3 Care Package (4), 4 Predator Missile (5), 5 Sentry Gun (5),
+;   6 Precision Airstrike (6), 7 Attack Helicopter (7), 8 AC-130 (11), 9 Chopper Gunner (11),
+;   10 Tactical Nuke (25).
+; The Predator, AC-130 and Chopper Gunner take your view (look steers / aims, the trigger fires,
+; Tab changes the AC-130's gun, E toggles thermal); the airstrike shows the ground from above
+; (look moves the target, the trigger confirms, E cancels). EmpKills: the EMP's kill count.
+; Scavenger: MW2's perk on every hostile kill: a magazine more for each gun and a frag (0: off).
+Scavenger=1
+; FallDamage: 0 none, 1 light (falls from 6 m hurt, 20 m kills), 2 MW2's (3.3 m hurts, 7.6 m kills).
+FallDamage=1
+; Slide: crouch while sprinting slides (modern Call of Duty's, at MW2's speeds); jump out of it (0: off).
+Slide=1
+; SprintSpeed: sprint speed over the run speed (MW2: 1.50). StaminaBar: the sprint meter under the weapon bar.
+SprintSpeed=1.65
+StaminaBar=1
+; KillCounter: hostile kills since the mode came on, this life's streak (towards the next killstreak) and
+; deaths in MW2's score bar above the radar; "Round Over" with that life's kills after a death (0: off).
+KillCounter=1
+; Mw2Blood: MW2's blood spreading in from the screen's edges as health drops (replaces CODV's red flash).
+; KillFeedback: MW2's yellow "+100" over the crosshair and its bonus splashes (Headshot!, Longshot!,
+; First Blood!, Double / Triple / Multi-Kill!) on hostile kills.
+Mw2Blood=1
+KillFeedback=1
+; JumpSlowdown: MW2's slowdown when landing a jump (0: a landing keeps the speed).
+JumpSlowdown=0
+; Parkour: AutoVault (sprinting into a ledge up to 1.5 m vaults it, no jump key, keeping the speed), MantleSpeed (MW2: 1.0),
+; HighClimb (jump at a 1.5 to 2.4 m ledge climbs it), Dive (hold crouch through a slide: dive to prone).
+AutoVault=1
+MantleSpeed=1.8
+HighClimb=1
+Dive=1
+; SmoothCollision: running past a car's corner, a fence or a mesh edge does not catch (0: MW2's raw collision).
+SmoothCollision=1
+; Tuning: SlideSpeed (x the sprint at the start), SlideTime (seconds), VaultMinHeight (metres: lower
+; obstacles are not vaulted on their own; 0 all), ClimbMaxHeight (metres). Mw2Footsteps: MW2's footsteps (by the ground's material),
+; landings and gear rattle instead of GTA's (re-run INSTALL.bat once to import them).
+SlideSpeed=1.3
+SlideTime=0.75
+VaultMinHeight=0
+ClimbMaxHeight=2.4
+Mw2Footsteps=1
+; AutoLadders: walking into a ladder or towards its top takes it (GTA climbs it; off: a pad's Y at its foot or top).
+AutoLadders=1
+; Lean: hold Q / E to lean left / right (CoD4's lean; MW2 mode takes GTA's cover and context keys), the reach
+; in metres (0 off).
+Lean=0.4
+Killstreaks=1
+AllKillstreaks=1
+SpacedKillstreaks=1
+Killstreak1=1
+Killstreak2=4
+Killstreak3=7
+EmpKills=15
+KeepKillstreaksOnDeath=0
+; ThirdPerson: start in MW2's third-person camera. ThirdPersonKey: C / Back toggle it, and V changes the
+; view in a vehicle (0, the default: first person always). ThirdPersonRange: metres behind.
+ThirdPerson=0
+ThirdPersonKey=0
+ThirdPersonRange=3.05
+; WeaponSounds: MW2's weapon sounds (imported from your MW2 by INSTALL.bat) played through GTA's audio,
+; replacing GTA's gun sound on CODV's shots (0: GTA's sounds). SoundGainDb: their level (dB); the menu (/)
+; changes it and saves it here. SoundMasterGain: linear gain on every MW2 voice. SoundCategory: GTA audio
+; category by name or 0x hash (SOUND: the sound's own). SoundBufferMs: audio queued in GTA's stream.
+WeaponSounds=1
+SoundGainDb=0
+SoundMasterGain=1.0
+SoundCategory=0xD4AE89CA
+SoundBufferMs=50
+; DataRoot: the data folder (weapons.json), relative to the GTA folder unless absolute.
+DataRoot={DATA_ROOT}

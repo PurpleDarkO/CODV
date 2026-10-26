@@ -1,0 +1,21 @@
+[package]
+name = "codv-engine"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "CODV's bridge to the Modern Warfare 2 engine code of iw4L: the player's pmove against a host-supplied world, in GTA-friendly units"
+
+# iw4L's crates, from the overlay tools/prepare_overlay.py builds (pinned
+# commit + patches/iw4l). Run it before building: BOOTSTRAP.bat and
+# tools/build-rust.ps1 do.
+[dependencies]
+math_iw4 = { path = "../../build/overlay/iw4l/crates/math_iw4" }
+playerstate_iw4 = { path = "../../build/overlay/iw4l/crates/playerstate_iw4" }
+trace_iw4 = { path = "../../build/overlay/iw4l/crates/trace_iw4" }
+movement_iw4 = { path = "../../build/overlay/iw4l/crates/movement_iw4" }
+weapon_iw4 = { path = "../../build/overlay/iw4l/crates/weapon_iw4" }
+clipmap_iw4 = { path = "../../build/overlay/iw4l/crates/clipmap_iw4" }
+anim_iw4 = { path = "../../build/overlay/iw4l/crates/anim_iw4" }
+xmodel_runtime = { path = "../../build/overlay/iw4l/crates/xmodel_runtime" }
+glam = "0.33.2"
+codv-mw2data = { path = "../codv-mw2data", default-features = false }

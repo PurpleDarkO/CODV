@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "repositories": [
+    {
+      "name": "gta5-nativedb-data",
+      "url": "https://github.com/alloc8or/gta5-nativedb-data.git",
+      "commit": "424fb51b089049a9fbcebcc641500b1d44d255b4",
+      "role": "GTA native names/hashes; tools/check-natives.py verifies host/src/natives.h against it",
+      "license": "verify before redistribution; reference data only",
+      "default_fetch": true
+    },
+    {
+      "name": "rpf-archive-rs",
+      "url": "https://github.com/VIRUXE/rpf-archive-rs.git",
+      "commit": "edd77588ed7fcf3cdd51949e7d3e647204c76036",
+      "role": "RPF7 archive access for the setup's codv-gtapack (GTA's keys from the player's GTA5.exe, update.rpf entries, CODV's DLC pack for the MW2 item in the weapon wheel); the commit SK8V pins",
+      "license": "Unlicense",
+      "default_fetch": true
+    },
+    {
+      "name": "gta-v-data-dumps",
+      "url": "https://github.com/DurtyFree/gta-v-data-dumps.git",
+      "commit": "b65684e00f689fdec405c5f1055322c802d3c895",
+      "role": "GTA weapon, anim dictionary, movement clipset and sound lists; tools/check-data.py verifies data/weapons.json and data/CodVHost.ini",
+      "license": "reference data only",
+      "default_fetch": false,
+      "notes": "Large; check-data.py does a sparse checkout of the four files it needs."
+    },
+    {
+      "name": "iw4L",
+      "url": "https://github.com/vladtrc/iw4L.git",
+      "commit": "acc57a5c9dd027db8eb5ef17c792fa69f059daa1",
+      "role": "Engine: Modern Warfare 2 player movement (movement_iw4), weapons (weapon_iw4) and collision traces (trace_iw4), compiled into CodVRuntime.dll through build/overlay/iw4l (tools/prepare_overlay.py, patches/iw4l); the setup's codv-mw2import reads the player's MW2 weapons with fastfile_iw4",
+      "license": "Apache-2.0 (iw4L NOTICE preserved in CODV NOTICE)",
+      "default_fetch": true,
+      "notes": "APIs change between commits: update the pin only on purpose, together with patches/iw4l. Read docs/provenance before adopting a further crate."
+    },
+    {
+      "name": "SK8V",
+      "url": "https://github.com/becaring/SK8V.git",
+      "commit": "6a1a6e2e369d1bc11382636400ed2b9d99a58142",
+      "role": "project structure reference, and the source of CODV's GTA collision reader (host/src/physics_level.*, host/src/game_probe.*, rust/codv-gtaworld: live.rs, bounds.rs, clean.rs; see NOTICE)",
+      "license": "Apache-2.0 (SK8V NOTICE and the Sol4ra credit preserved in CODV NOTICE)",
+      "default_fetch": false
+    }
+  ],
+  "generated_date": "2026-10-18"
+}

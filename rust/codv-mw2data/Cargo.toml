@@ -1,0 +1,24 @@
+[package]
+name = "codv-mw2data"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+description = "CODV's MW2 weapon table, and its import from the player's own Modern Warfare 2 fastfiles (iw4L's fastfile_iw4) at setup."
+
+[features]
+# The importer (zone reader, inflate). The runtime uses only the table.
+default = ["import"]
+import = ["dep:fastfile_iw4", "dep:asset_iw4", "dep:miniz_oxide"]
+
+[dependencies]
+codv-core = { path = "../codv-core" }
+anim_iw4 = { path = "../../build/overlay/iw4l/crates/anim_iw4" }
+asset_iw4 = { path = "../../build/overlay/iw4l/crates/asset_iw4", optional = true }
+fastfile_iw4 = { path = "../../build/overlay/iw4l/crates/fastfile_iw4", optional = true }
+miniz_oxide = { version = "0.8.9", default-features = false, features = ["with-alloc"], optional = true }
+
+[[bin]]
+name = "codv-mw2import"
+path = "src/bin/codv-mw2import.rs"
+required-features = ["import"]

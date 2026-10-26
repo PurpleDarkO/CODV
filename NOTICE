@@ -1,0 +1,144 @@
+CODV
+Copyright 2026 the CODV authors
+
+Licensed under the Apache License, Version 2.0 (LICENSE).
+
+CODV is an unofficial fan project, unaffiliated with Activision, Infinity
+Ward, Rockstar Games or Take-Two Interactive. It contains no retail Call
+of Duty or GTA V code, data, models, animation, sound or art; players
+supply their own copies of GTA V (and, from phase F3, Modern Warfare 2).
+ScriptHookV is not included: it is fetched from Alexander Blade's official
+distribution (dev-c.com) and the ASI links against its SDK import library.
+
+Modern Warfare 2 engine code: iw4L (Apache-2.0)
+  CodVRuntime.dll compiles these crates of iw4L by vladtrc,
+  https://github.com/vladtrc/iw4L, at the commit pinned in
+  upstreams.lock.json: movement_iw4, weapon_iw4, playerstate_iw4, hud_iw4,
+  trace_iw4, clipmap_iw4, math_iw4, asset_iw4, d3d9_decl, d3d9_state,
+  anim_iw4, xmodel_runtime, and (in the setup's codv-mw2import tool)
+  fastfile_iw4.
+  tools/prepare_overlay.py copies them into build/overlay/iw4l and applies
+  CODV's modifications from patches/iw4l/ (none today). No iw4L source is
+  copied into this repository. rust/codv-engine also restates the player
+  spawn state and pmove context values of iw4L's sim crate
+  (sim/src/world.rs spawn_player_state, sim/src/step.rs pmove_context).
+  Ported from iw4L with the changes noted in each file's header (F4a):
+    rust/codv-mw2data/src/viewmodels.rs  asset_model model_skel /
+        packed_vertex, asset_anim xanim_catalog, asset_material link map
+    rust/codv-mw2data/src/iwd.rs         asset_iw4 iwi, asset_material
+        material_images decode
+    rust/codv-engine/src/viewmodel.rs    asset_anim clip_scheduler,
+        render_anim viewmodel_controller / anim fpv / fpv_rig / fpv_present
+        / view_sway, asset_game fpv_assembly
+    rust/codv-mw2data/src/playeranim/    asset_anim animtree, atr_compile,
+        playeranim_parse (F4b)
+    rust/codv-engine/src/body.rs         sim player_anim_script and its
+        calls in sim step / combat, render_anim remote_animation /
+        remote_body (F4b)
+    rust/codv-mw2data/src/hud.rs         asset_game menu_catalog font /
+        menu capture (F5b)
+    rust/codv-runtime/src/mw2hud.rs      hud weaponbar / ammo / chrome
+        owner draws, draw2d text layout, damage_direction (F5b)
+    rust/codv-mw2data/src/sounds.rs      asset_audio sound_catalog
+        capture_iw4 (alias rows, loaded sounds, sound file edges) (F5a)
+    rust/codv-engine/src/viewmodel.rs    asset_anim clip_scheduler
+        notetrack crossings (F5a)
+  glam (crates.io, MIT OR Apache-2.0, https://github.com/bitshifter/glam-rs),
+  at the version iw4L pins, comes with xmodel_runtime.
+  iw4L's NOTICE reads, in part:
+
+    IW4L
+    Copyright 2026 vladtrc
+    IW4L was originally developed by vladtrc.
+    https://github.com/vladtrc/iw4L
+    IW4L is licensed under the Apache License, Version 2.0; see LICENSE.
+
+  iw4L's NOTICE also lists the projects its authors consulted
+  (OpenAssetTools, its iw4x-x64 fork, IW4x, KisakCOD, Ghidra) and states
+  that none is vendored, linked or shipped; its docs/provenance records how
+  the movement solver was reimplemented in isolation. CODV relies on those
+  statements and adds no code from those projects.
+
+Modern Warfare 2 weapon data: the player's own copy
+  codv-mw2import reads the weapons from the player's installed Modern Warfare
+  2 (zone/english/common_mp.ff, patch_mp.ff) on the player's machine and
+  writes their numbers to <GTA>/CODV/mw2/weapons.json there (and their view
+  models, character animation and sounds under <GTA>/CODV/mw2/). No MW2 file or
+  value is stored in this repository or shipped in a release; data/mw2.json
+  holds only CODV's own choices (loadout, GTA stand-in weapons, scale).
+  The import inflates the zone with miniz_oxide (crates.io, MIT OR Zlib OR
+  Apache-2.0, https://github.com/Frommi/miniz_oxide) and adler2 (crates.io,
+  0BSD OR MIT OR Apache-2.0).
+
+rpf-archive-rs (Unlicense)
+  https://github.com/VIRUXE/rpf-archive-rs at the commit pinned in
+  upstreams.lock.json, fetched into upstream/ and compiled into the setup's
+  codv-gtapack (GTA's keys, update.rpf entries, CODV's DLC pack). Not copied
+  into this repository.
+
+Real-time collision detection: credit to Sol4ra
+  The live GTA collision reader (host/src/physics_level.*,
+  rust/codv-gtaworld/src/live.rs) comes from SK8V, which adapted it for
+  Legacy from Sol4ra's LS-Skate-LiveCollision (GTA V Enhanced), shared with
+  SK8V by its author.
+
+Code from SK8V (Apache-2.0)
+  SK8V, Copyright 2026 becaring, https://github.com/becaring/SK8V, at the
+  commit pinned in upstreams.lock.json. CODV reuses, with the changes noted
+  in each file's header:
+    host/src/physics_level.*   SK8V host/src/physics_level.* (Sol4ra's reader)
+    host/src/game_probe.*      SK8V host/src/game_probe.* (ReadLive, FragInstOf)
+    host/src/movers.*          gathering after SK8V host/src/dynamic_world.cpp
+    rust/codv-gtaworld/src/live.rs    SK8V rust/skatev-runtime/src/live.rs
+                                      (instance_model split out of model_at)
+    rust/codv-gtaworld/src/bounds.rs  SK8V rust/svwc/src/bounds.rs
+    rust/codv-gtaworld/src/clean.rs   SK8V rust/svwc/src/clean.rs
+    host/src/d3d11_saved_state.h      SK8V host/src/d3d11_saved_state.h
+    host/src/pose_hook.*, pose_math.h SK8V host/src/pose_hook.*, pose_math.h
+                                      (no gun blend, no live clip; object
+                                      matrices published directly)
+    host/src/game_probe.*             SK8V's ResolvePedSkeleton, SkeletonJson
+    rust/codv-engine/src/body/retarget.rs  the retarget method of SK8V
+                                      rust/skatev-runtime/src/ped.rs (MW2
+                                      joints as the source, no board contacts)
+    host/src/viewmodel_render.*       pass structure after SK8V
+                                      host/src/xray_renderer.cpp
+    host/src/pack_loader.h            SK8V host/src/pack_loader.h (CODV's
+                                      pack; chains after other hooks)
+    rust/codv-gtapack/src/archive.rs  SK8V rust/gta-archives/src/lib.rs
+    rust/codv-gtapack/src/pack.rs     the dlc pack of SK8V
+                                      rust/ped-export/src/bin/live_clip.rs
+                                      (weapon only, no clip)
+    tools/build-mw2-weapon.py         SK8V tools/build-board-weapon.py
+    tools/build-mw2-icon.py           SK8V tools/build-board-icon.py (CODV's
+                                      own art)
+    host/src/gta_audio.*              SK8V host/src/gta_audio.* (one
+                                      emitter, no Rockstar Editor recording)
+    host/src/gta_audio_re.*, gta_audio_dsp.*, image_code_ranges.h
+                                      SK8V's, unchanged
+  SK8V's NOTICE reads, in part:
+
+    SK8V
+    Copyright 2026 becaring
+    Licensed under the Apache License, Version 2.0 (LICENSE).
+
+CODV gunplay rules (original)
+  rust/codv-core and data/weapons.json are original work: the genre's common
+  ideas (fire rate, hip and aim-down-sights spread, bloom, view kick, range
+  damage falloff, regenerating health) with CODV's own code and values. They
+  are the interim gunplay until phase F3 drives weapons with weapon_iw4.
+
+Project structure
+  CODV follows the layout and conventions of SK8V by becaring (Apache-2.0),
+  https://github.com/becaring/SK8V: a ScriptHookV ASI host, a Rust runtime
+  behind a versioned C ABI, pinned upstreams and a resumable player-side
+  setup with an ownership manifest. Some build and setup scripts are adapted
+  from SK8V's (by way of the sibling DOGV and FIGHTV projects). The GTA
+  collision code reused from SK8V is listed above.
+
+GTA reference data (verification only, not redistributed)
+  tools/check-natives.py checks native hashes against alloc8or's
+  gta5-nativedb-data; tools/check-data.py checks weapon, clip, clipset and
+  sound names against DurtyFree's gta-v-data-dumps. Neither is shipped. The
+  weapons, animations and sounds used in game are GTA's own, loaded from the
+  player's installation.

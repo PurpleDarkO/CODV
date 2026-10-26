@@ -1,0 +1,13 @@
+[package]
+name = "codv-gtaworld"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+description = "GTA V's loaded collision read live from its physics level, as triangles (SK8V's reader, after Sol4ra)."
+
+[dependencies]
+
+[features]
+# `fake`: a GTA physics level laid out in this process's memory (tests).
+fake = []

@@ -1,0 +1,260 @@
+#pragma once
+// The GTA natives CODV uses, by hash. Every `CV_NATIVE(NAME, 0x...)` line is
+// checked against the pinned alloc8or nativedb by tools/check-natives.py, so
+// keep one native per line in that form. Signatures are in the comments.
+#include <main.h>
+#include <types.h>
+#include <type_traits>
+
+namespace gta {
+
+template <typename T>
+inline void Push(T value) {
+    UINT64 v = 0;
+    static_assert(sizeof(T) <= sizeof(UINT64));
+    *reinterpret_cast<T*>(&v) = value;
+    nativePush64(v);
+}
+
+template <typename R, typename... Args>
+inline R Call(UINT64 hash, Args... args) {
+    nativeInit(hash);
+    (Push(args), ...);
+    if constexpr (std::is_void_v<R>) nativeCall();
+    else return *reinterpret_cast<R*>(nativeCall());
+}
+
+#define CV_NATIVE(NAME, HASH) inline constexpr UINT64 NAME = HASH;
+// PLAYER
+CV_NATIVE(PLAYER_PED_ID, 0xD80958FC74E988A6)                     // Ped ()
+CV_NATIVE(PLAYER_ID, 0x4F8644AF03D0E0D6)                         // Player ()
+CV_NATIVE(IS_PLAYER_PLAYING, 0x5E9564D8246B909A)                 // BOOL (Player)
+CV_NATIVE(IS_PLAYER_CONTROL_ON, 0x49C32D60007AFA47)              // BOOL (Player)
+CV_NATIVE(SET_RUN_SPRINT_MULTIPLIER_FOR_PLAYER, 0x6DB47AA77FD94E09) // void (Player, float 1.0 .. 1.49)
+// ENTITY
+CV_NATIVE(DOES_ENTITY_EXIST, 0x7239B21A38F536BA)                 // BOOL (Entity)
+CV_NATIVE(GET_ENTITY_COORDS, 0x3FEF770D40960D5A)                 // Vector3 (Entity, BOOL alive)
+CV_NATIVE(SET_ENTITY_VISIBLE, 0xEA1C610A04DB6BBB)                // void (Entity, BOOL toggle, BOOL)
+CV_NATIVE(SET_ENTITY_ROTATION, 0x8524A8B0171D5E07)               // void (Entity, pitch, roll, yaw, int order, BOOL)
+CV_NATIVE(SET_ENTITY_COLLISION, 0x1A9205C1B9EE827F)              // void (Entity, BOOL toggle, BOOL keepPhysics)
+// OBJECT / STREAMING / FIRE
+CV_NATIVE(CREATE_OBJECT_NO_OFFSET, 0x9A294B2138ABB884)           // Object (Hash, x, y, z, BOOL net, BOOL hostObj, BOOL dynamic, Any)
+CV_NATIVE(DELETE_OBJECT, 0x539E0AE3E6634B9F)                     // void (Object*)
+CV_NATIVE(REQUEST_MODEL, 0x963D27A58DF860AC)                     // void (Hash)
+CV_NATIVE(HAS_MODEL_LOADED, 0x98A4EB5D89A0C952)                  // BOOL (Hash)
+CV_NATIVE(ADD_OWNED_EXPLOSION, 0x172AA1B624FA1013)               // void (Ped, x, y, z, int type, float scale, BOOL audible, BOOL invisible, float shake)
+CV_NATIVE(GET_ENTITY_VELOCITY, 0x4805D2B1D8CF94A9)               // Vector3 (Entity)
+CV_NATIVE(SET_ENTITY_VELOCITY, 0x1C99BB7B6E96D16F)               // void (Entity, x, y, z)
+CV_NATIVE(GET_ENTITY_SPEED, 0xD5037BA82E12416F)                  // float (Entity)
+CV_NATIVE(GET_ENTITY_HEALTH, 0xEEF059FAD016D209)                 // int (Entity)
+CV_NATIVE(GET_ENTITY_MAX_HEALTH, 0x15D757606D170C3C)             // int (Entity)
+CV_NATIVE(HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY, 0xC86D67D52A707CF8)  // BOOL (Entity, Entity, BOOL)
+CV_NATIVE(CLEAR_ENTITY_LAST_DAMAGE_ENTITY, 0xA72CD9CA74A5ECBA)    // void (Entity)
+CV_NATIVE(GET_COORDS_OF_PROJECTILE_TYPE_WITHIN_DISTANCE, 0xDFB4138EEFED7B81) // BOOL (Ped, Hash, float, Vector3*, BOOL)
+CV_NATIVE(GET_PROJECTILE_OF_PROJECTILE_TYPE_WITHIN_DISTANCE, 0x82FDE6A57EE4EE44) // BOOL (Ped, Hash, float, Vector3*, Object*, BOOL)
+CV_NATIVE(SET_ENTITY_HEALTH, 0x6B76DC1F3AE6E6A3)                 // void (Entity, int health, Entity instigator, Hash weapon)
+CV_NATIVE(GET_ENTITY_HEIGHT_ABOVE_GROUND, 0x1DD55701034110E5)    // float (Entity)
+CV_NATIVE(IS_ENTITY_A_PED, 0x524AC5ECEA15343E)                   // BOOL (Entity)
+CV_NATIVE(IS_ENTITY_A_VEHICLE, 0x6AC7003FA6E5575E)               // BOOL (Entity)
+CV_NATIVE(GET_PED_SOURCE_OF_DEATH, 0x93C8B64DEB84728C)           // Entity (Ped): who killed it (0: no one)
+CV_NATIVE(GET_PED_LAST_DAMAGE_BONE, 0xD75960F6BD9EA49C)          // BOOL (Ped, int* bone)
+CV_NATIVE(GET_PED_IN_VEHICLE_SEAT, 0xBB40DD2270B65366)           // Ped (Vehicle, int seat, BOOL)
+CV_NATIVE(IS_ENTITY_IN_WATER, 0xCFB0A0D8EDD145A3)                // BOOL (Entity)
+CV_NATIVE(FREEZE_ENTITY_POSITION, 0x428CA6DBD1094446)            // void (Entity, BOOL toggle)
+CV_NATIVE(SET_ENTITY_COORDS_NO_OFFSET, 0x239A3351AC1DA385)       // void (Entity, x, y, z, BOOL, BOOL, BOOL)
+CV_NATIVE(SET_ENTITY_HEADING, 0x8E2530AA8ADA980E)                // void (Entity, float heading)
+CV_NATIVE(SET_ENTITY_LOCALLY_INVISIBLE, 0xE135A9FF3F5D05D8)      // void (Entity), this frame
+CV_NATIVE(SET_ENTITY_ALPHA, 0x44A0870B7E92D7C0)                  // void (Entity, int alpha, BOOL skin)
+CV_NATIVE(RESET_ENTITY_ALPHA, 0x9B1E824FFBB7027A)                // void (Entity)
+CV_NATIVE(GET_ENTITY_MATRIX, 0xECB2FC7235A7D137)                 // void (Entity, Vector3* forward, Vector3* right, Vector3* up, Vector3* pos)
+CV_NATIVE(GET_ENTITY_MODEL, 0x9F47B058362C84B5)                  // Hash (Entity)
+CV_NATIVE(IS_ENTITY_VISIBLE, 0x47D6F43D77935C75)                 // BOOL (Entity)
+CV_NATIVE(IS_ENTITY_ATTACHED, 0xB346476EF1A64897)                // BOOL (Entity)
+CV_NATIVE(IS_ENTITY_DEAD, 0x5F9532F3B5CC2551)                    // BOOL (Entity, BOOL p1)
+CV_NATIVE(GET_MODEL_DIMENSIONS, 0x03E8D3D5F549087A)              // void (Hash, Vector3* min, Vector3* max)
+CV_NATIVE(GET_VEHICLE_PED_IS_IN, 0x9A9112A0FE9A4713)             // Vehicle (Ped, BOOL includeEntering)
+CV_NATIVE(DOOR_SYSTEM_FIND_EXISTING_DOOR, 0x589F80B325CC82C5)    // BOOL (x, y, z, Hash model, Hash* outDoorHash)
+// PED
+CV_NATIVE(IS_PED_GETTING_INTO_A_VEHICLE, 0xBB062B2B5722478E)     // BOOL (Ped)
+CV_NATIVE(IS_PED_CLIMBING, 0x53E8CB4F48BFE623)                   // BOOL (Ped)
+CV_NATIVE(GET_VEHICLE_PED_IS_TRYING_TO_ENTER, 0x814FA8BE5449445D) // Vehicle (Ped)
+CV_NATIVE(GET_IS_TASK_ACTIVE, 0xB0760331C7AA4155)                // BOOL (Ped, int taskType)
+CV_NATIVE(TASK_CLIMB_LADDER, 0xB6C987F9285A3814)                 // void (Ped, BOOL fast)
+CV_NATIVE(TASK_ENTER_VEHICLE, 0xC20E50AA46D09CA8)                // void (Ped, Vehicle, int timeout, int seat, float speed, int flag, const char* clipset)
+CV_NATIVE(CLEAR_PED_TASKS, 0xE1EF3C1216AFF2CD)                   // void (Ped)
+CV_NATIVE(GET_PED_PARACHUTE_STATE, 0x79CFD9827CC979B6)           // int (Ped): -1 none, 0 on the back, 1 opening, 2 open, 3 doomed
+CV_NATIVE(SET_FORCE_FOOTSTEP_UPDATE, 0x129466ED55140F8D)         // void (Ped, BOOL)
+CV_NATIVE(GET_SHAPE_TEST_RESULT_INCLUDING_MATERIAL, 0x65287525D951F6BE) // int (int, BOOL*, Vector3*, Vector3*, Hash*, Entity*)
+CV_NATIVE(SET_PED_FOOTSTEPS_EVENTS_ENABLED, 0x0653B735BFBDFE87)  // void (Ped, BOOL)
+CV_NATIVE(GET_CURRENT_PED_WEAPON_ENTITY_INDEX, 0x3B390A939AF0B5FC) // Entity (Ped, BOOL doDeadCheck)
+CV_NATIVE(IS_PED_ON_FOOT, 0x01FEE67DB37F59B2)                    // BOOL (Ped)
+CV_NATIVE(IS_PED_IN_ANY_VEHICLE, 0x997ABD671D25CA0B)             // BOOL (Ped, BOOL atGetIn)
+CV_NATIVE(IS_PED_RAGDOLL, 0x47E4E977581C5B55)                    // BOOL (Ped)
+CV_NATIVE(IS_PED_FALLING, 0xFB92A102F1C4DFA3)                    // BOOL (Ped)
+CV_NATIVE(IS_PED_JUMPING, 0xCEDABC5900A0BF97)                    // BOOL (Ped)
+CV_NATIVE(IS_PED_SPRINTING, 0x57E457CD2C0FC168)                  // BOOL (Ped)
+CV_NATIVE(IS_PED_IN_PARACHUTE_FREE_FALL, 0x7DCE8BDA0F1C1200)     // BOOL (Ped)
+CV_NATIVE(IS_PED_DEAD_OR_DYING, 0x3317DEDB88C95038)              // BOOL (Ped, BOOL)
+CV_NATIVE(GET_PED_BONE_COORDS, 0x17C07FC640E86B4E)               // Vector3 (Ped, int boneId, ox, oy, oz)
+CV_NATIVE(SET_PED_MOVE_RATE_OVERRIDE, 0x085BF80FA50A39D1)        // void (Ped, float): per frame
+CV_NATIVE(REQUEST_CLIP_SET, 0xD2A71E1A77418A49)                  // void (const char*)
+CV_NATIVE(HAS_CLIP_SET_LOADED, 0x318234F4F3738AF3)               // BOOL (const char*)
+CV_NATIVE(SET_PED_MOVEMENT_CLIPSET, 0xAF8A94EDE7712BEF)          // void (Ped, const char*, float transition)
+CV_NATIVE(RESET_PED_MOVEMENT_CLIPSET, 0xAA74EC0CB0AAEA2C)        // void (Ped, float)
+CV_NATIVE(SET_PED_STRAFE_CLIPSET, 0x29A28F3F8CF6D854)            // void (Ped, const char*)
+CV_NATIVE(RESET_PED_STRAFE_CLIPSET, 0x20510814175EA477)          // void (Ped)
+CV_NATIVE(APPLY_DAMAGE_TO_PED, 0x697157CED63F18D4)               // void (Ped, int amount, BOOL, Any, Hash weapon)
+// WEAPON
+CV_NATIVE(GET_SELECTED_PED_WEAPON, 0x0A6DB4965674D243)           // Hash (Ped)
+CV_NATIVE(SET_CURRENT_PED_WEAPON, 0xADF692B254977C0C)            // void (Ped, Hash, BOOL forceInHand)
+CV_NATIVE(GIVE_WEAPON_TO_PED, 0xBF0FD6E56C964FCB)                // void (Ped, Hash, int ammo, BOOL hidden, BOOL forceInHand)
+CV_NATIVE(HAS_PED_GOT_WEAPON, 0x8DECB02F88F428BC)                // BOOL (Ped, Hash, BOOL)
+CV_NATIVE(IS_WEAPON_VALID, 0x937C71165CF334B3)                   // BOOL (Hash)
+CV_NATIVE(GET_AMMO_IN_PED_WEAPON, 0x015A522136D7F951)            // int (Ped, Hash)
+CV_NATIVE(SET_PED_AMMO, 0x14E56BC5B5DB6A19)                      // void (Ped, Hash, int ammo, BOOL)
+CV_NATIVE(SET_AMMO_IN_CLIP, 0xDCD2A934D65CB497)                  // BOOL (Ped, Hash, int ammo): mirrors CODV's magazine
+CV_NATIVE(SHOOT_SINGLE_BULLET_BETWEEN_COORDS_IGNORE_ENTITY, 0xE3A7742E0B7A2F8B) // void (x1, y1, z1, x2, y2, z2, int damage, BOOL, Hash weapon, Ped owner, BOOL audible, BOOL invisible, float speed, Entity ignore, Any)
+CV_NATIVE(SET_PED_SHOOTS_AT_COORD, 0x96A05E4FB321B1BA)           // void (Ped, x, y, z, BOOL)
+// TASK / STREAMING
+CV_NATIVE(TASK_RELOAD_WEAPON, 0x62D2916F56B9CD2D)                // void (Ped, BOOL drawWeapon)
+CV_NATIVE(TASK_PLAY_ANIM, 0xEA47FE3719165B94)                    // void (Ped, dict, anim, blendIn, blendOut, int ms, int flag, float rate, BOOL, BOOL, BOOL)
+CV_NATIVE(REQUEST_ANIM_DICT, 0xD3BD40951412FEF6)                 // void (const char*)
+CV_NATIVE(HAS_ANIM_DICT_LOADED, 0xD031A9162D01088C)              // BOOL (const char*)
+// SHAPETEST
+CV_NATIVE(START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE, 0x377906D8A31E5586) // int (x1, y1, z1, x2, y2, z2, int flags, Entity ignore, int options)
+CV_NATIVE(GET_SHAPE_TEST_RESULT, 0x3D87450E15D98694)             // int (int handle, BOOL* hit, Vector3* end, Vector3* normal, Entity* hitEntity)
+// CAMERA
+CV_NATIVE(CREATE_CAM_WITH_PARAMS, 0xB51194800B257161)            // Cam (name, x, y, z, rx, ry, rz, fov, BOOL active, int rotOrder)
+CV_NATIVE(DESTROY_CAM, 0x865908C81A2C22E9)                       // void (Cam, BOOL scriptHostCam)
+CV_NATIVE(RENDER_SCRIPT_CAMS, 0x07E5B515DB0636FC)                // void (BOOL render, BOOL ease, int easeTime, BOOL, BOOL, Any)
+CV_NATIVE(SET_CAM_COORD, 0x4D41783FB745E42E)                     // void (Cam, x, y, z)
+CV_NATIVE(SET_CAM_ROT, 0x85973643155D0B07)                       // void (Cam, rx, ry, rz, int rotOrder)
+CV_NATIVE(SET_CAM_FOV, 0xB13C14F66A00D047)                       // void (Cam, float fov)
+CV_NATIVE(GET_GAMEPLAY_CAM_COORD, 0x14D6F5678D8F1B37)            // Vector3 ()
+CV_NATIVE(GET_GAMEPLAY_CAM_ROT, 0x837765A25378F0BB)              // Vector3 (int order)
+CV_NATIVE(GET_GAMEPLAY_CAM_FOV, 0x65019750A0324133)              // float ()
+CV_NATIVE(GET_GAMEPLAY_CAM_RELATIVE_PITCH, 0x3A6867B4845BEDA2)   // float ()
+CV_NATIVE(SET_GAMEPLAY_CAM_RELATIVE_PITCH, 0x6D0858B8EDFD2B7D)   // void (float angle, float scaling)
+CV_NATIVE(GET_GAMEPLAY_CAM_RELATIVE_HEADING, 0x743607648ADD4587) // float ()
+CV_NATIVE(SET_GAMEPLAY_CAM_RELATIVE_HEADING, 0xB4EC2312F4E5B1F1) // void (float heading)
+CV_NATIVE(GET_FOLLOW_PED_CAM_VIEW_MODE, 0x8D4D46230B2C353A)      // int (): 4 = first person
+CV_NATIVE(GET_FOLLOW_VEHICLE_CAM_VIEW_MODE, 0xA4FF579AC0E3AAAE)  // int (): 4 = first person
+CV_NATIVE(SET_FOLLOW_PED_CAM_VIEW_MODE, 0x5A4F9EDF1673F704)      // void (int)
+CV_NATIVE(SET_FOLLOW_VEHICLE_CAM_VIEW_MODE, 0xAC253D7842768F48)  // void (int)
+// MISC
+CV_NATIVE(GET_GROUND_Z_FOR_3D_COORD, 0xC906A7DAB05C8D2B)         // BOOL (x, y, z, float* groundZ, BOOL ignoreWater, BOOL p5)
+CV_NATIVE(GET_FRAME_TIME, 0x15C40837039FFAF7)                    // float ()
+CV_NATIVE(GET_MISSION_FLAG, 0xA33CDCCDA663159E)                  // BOOL ()
+CV_NATIVE(IS_CUTSCENE_ACTIVE, 0x991251AFC3981F84)                // BOOL ()
+CV_NATIVE(NETWORK_IS_GAME_IN_PROGRESS, 0x10FAB35428CCC9D7)       // BOOL ()
+CV_NATIVE(GET_IS_LOADING_SCREEN_ACTIVE, 0x10D0A8F259E93EC9)      // BOOL ()
+// PAD
+CV_NATIVE(IS_DISABLED_CONTROL_JUST_PRESSED, 0x91AEF906BCA88877)  // BOOL (int padIndex, int control)
+CV_NATIVE(GET_DISABLED_CONTROL_NORMAL, 0x11E65974A982637C)       // float (int padIndex, int control)
+CV_NATIVE(GET_DISABLED_CONTROL_UNBOUND_NORMAL, 0x4F8A26A890FD62FB) // float (int padIndex, int control)
+CV_NATIVE(IS_USING_KEYBOARD_AND_MOUSE, 0xA571D46727E2B718)       // BOOL (int padIndex)
+CV_NATIVE(DISABLE_CONTROL_ACTION, 0xFE99B66D079CF6BC)            // void (int group, int action, BOOL)
+CV_NATIVE(IS_DISABLED_CONTROL_PRESSED, 0xE2587F8CBBD87B1D)       // BOOL (int group, int action)
+// AUDIO
+CV_NATIVE(PLAY_SOUND_FRONTEND, 0x67C540AA08E4A6F5)               // void (int id, name, set, BOOL)
+// NETWORK
+CV_NATIVE(NETWORK_IS_SESSION_STARTED, 0x9DE624D2FC4B603F)        // BOOL ()
+// HUD / GRAPHICS
+CV_NATIVE(IS_PAUSE_MENU_ACTIVE, 0xB0034A223497FFCB)              // BOOL ()
+CV_NATIVE(IS_PAUSE_MENU_RESTARTING, 0x1C491717107431C7)          // BOOL ()
+CV_NATIVE(IS_WARNING_MESSAGE_ACTIVE, 0xE18B138FABC53103)         // BOOL ()
+CV_NATIVE(IS_SCREEN_FADED_OUT, 0xB16FCE9DDC7BA182)               // BOOL ()
+CV_NATIVE(IS_SCREEN_FADING_OUT, 0x797AC7CB535BA28F)              // BOOL ()
+CV_NATIVE(IS_PLAYER_SWITCH_IN_PROGRESS, 0xD9D2CFFF49FAB35F)      // BOOL ()
+CV_NATIVE(IS_CUTSCENE_PLAYING, 0xD3C2E180A40F031E)               // BOOL ()
+CV_NATIVE(HIDE_HUD_COMPONENT_THIS_FRAME, 0x6806C51AD12B83B8)     // void (int id): 2 weapon icon, 14 reticle
+CV_NATIVE(GET_ASPECT_RATIO, 0xF1307EF624A80D87)                  // float (BOOL)
+CV_NATIVE(DRAW_RECT, 0x3A618A217E5154F0)                         // void (x, y, w, h, r, g, b, a, BOOL)
+CV_NATIVE(BEGIN_TEXT_COMMAND_DISPLAY_TEXT, 0x25FBB336DF1804CB)   // void (const char*)
+CV_NATIVE(ADD_TEXT_COMPONENT_SUBSTRING_PLAYER_NAME, 0x6C188BE134E074AA) // void (const char*)
+CV_NATIVE(END_TEXT_COMMAND_DISPLAY_TEXT, 0xCD015E5BB0D96A57)     // void (x, y, int)
+CV_NATIVE(SET_TEXT_SCALE, 0x07C837F9A01C34C9)                    // void (float, float)
+CV_NATIVE(SET_TEXT_FONT, 0x66E0276CC5F6B9DA)                     // void (int)
+CV_NATIVE(SET_TEXT_COLOUR, 0xBE6B23FFA53FB442)                   // void (r, g, b, a)
+CV_NATIVE(SET_TEXT_OUTLINE, 0x2513DFB0FB8400FE)                  // void ()
+CV_NATIVE(SET_TEXT_CENTRE, 0xC02F4DBFB51D988B)                   // void (BOOL)
+CV_NATIVE(SET_TEXT_RIGHT_JUSTIFY, 0x6B3C4650BC8BEE47)            // void (BOOL)
+CV_NATIVE(SET_TEXT_WRAP, 0x63145D9C883A1A70)                     // void (float start, float end)
+CV_NATIVE(GET_CLOCK_HOURS, 0x25223CA6B4D20B7F)                   // int ()
+CV_NATIVE(GET_CLOCK_MINUTES, 0x13D2B8ADD79640F2)                 // int ()
+CV_NATIVE(GET_INTERIOR_FROM_ENTITY, 0x2107BA504071A6BB)          // Interior (Entity)
+// F5c killstreaks: who is hostile, the UAV's radar blips, the EMP's blackout and stalled engines.
+CV_NATIVE(GET_PED_TYPE, 0xFF059E1E4C01E63C)                      // int (Ped)
+CV_NATIVE(IS_PED_IN_COMBAT, 0x4859F1FC66A6278E)                  // BOOL (Ped, Ped target)
+CV_NATIVE(GET_RELATIONSHIP_BETWEEN_PEDS, 0xEBA5AD3A0EAF7121)     // int (Ped, Ped)
+CV_NATIVE(IS_PED_A_PLAYER, 0x12534C348C6CB68B)                   // BOOL (Ped)
+CV_NATIVE(ADD_BLIP_FOR_ENTITY, 0x5CDE92C702A8FCE7)               // Blip (Entity)
+CV_NATIVE(SET_BLIP_SPRITE, 0xDF735600A4696DAF)                   // void (Blip, int)
+CV_NATIVE(SET_BLIP_COLOUR, 0x03D7FB09E75D6B7E)                   // void (Blip, int)
+CV_NATIVE(SET_BLIP_SCALE, 0xD38744167B2FA257)                    // void (Blip, float)
+CV_NATIVE(SET_BLIP_AS_SHORT_RANGE, 0xBE8BE4FE60E27B72)           // void (Blip, BOOL)
+CV_NATIVE(DOES_BLIP_EXIST, 0xA6DB27D19ECBB7DA)                   // BOOL (Blip)
+CV_NATIVE(REMOVE_BLIP, 0x86A652570E5F25DD)                       // void (Blip*)
+CV_NATIVE(SET_ARTIFICIAL_LIGHTS_STATE, 0x1268615ACE24D504)       // void (BOOL blackout)
+CV_NATIVE(SET_VEHICLE_ENGINE_ON, 0x2497C4717C8B881E)             // void (Vehicle, BOOL, BOOL instantly, BOOL noAutoStart)
+CV_NATIVE(SET_VEHICLE_OUT_OF_CONTROL, 0xF19D095E42D430CC)        // void (Vehicle, BOOL killDriver, BOOL explode)
+CV_NATIVE(IS_THIS_MODEL_A_HELI, 0xDCE4334788AF94EA)              // BOOL (Hash)
+CV_NATIVE(IS_THIS_MODEL_A_PLANE, 0xA0948AB42D7BA0DE)             // BOOL (Hash)
+CV_NATIVE(IS_PLAYER_DEAD, 0x424D4687FA1E5652)                    // BOOL (Player)
+CV_NATIVE(GET_GAME_TIMER, 0x9CD27B0045628463)                    // int () game milliseconds (pauses with the game)
+// F5c stages 2-4: the killstreaks' cameras, aircraft, crates, turrets, explosions and the nuke.
+CV_NATIVE(SET_CAM_ACTIVE, 0x026FB97D0A425F84)      // void (Cam, BOOL)
+CV_NATIVE(SHAKE_CAM, 0x6A25241C340D3822)           // void (Cam, const char*, float)
+CV_NATIVE(GET_ENTITY_HEADING, 0xE83D4F9BA2A38914)  // float (Entity)
+CV_NATIVE(GET_OFFSET_FROM_ENTITY_IN_WORLD_COORDS, 0x1899F328B0E12848) // Vector3 (Entity, float, float, float)
+CV_NATIVE(IS_ENTITY_IN_AIR, 0x886E37EC497200B6)    // BOOL (Entity)
+CV_NATIVE(DELETE_ENTITY, 0xAE3CBE5BF394C9C9)       // void (Entity*)
+CV_NATIVE(SET_ENTITY_AS_MISSION_ENTITY, 0xAD738C3085FE7E11) // void (Entity, BOOL, BOOL)
+CV_NATIVE(SET_ENTITY_AS_NO_LONGER_NEEDED, 0xB736A491E64A32CF) // void (Entity*)
+CV_NATIVE(SET_ENTITY_COORDS, 0x06843DA7060A026B)   // void (Entity, float, float, float, BOOL, BOOL, BOOL, BOOL)
+CV_NATIVE(SET_ENTITY_INVINCIBLE, 0x3882114BDE571AD4) // void (Entity, BOOL, BOOL)
+CV_NATIVE(SET_ENTITY_LOD_DIST, 0x5927F96A78577363) // void (Entity, int)
+CV_NATIVE(ADD_EXPLOSION, 0xE3AD2BDBAEE269AC)       // void (float, float, float, int, float, BOOL, BOOL, float, BOOL)
+CV_NATIVE(GET_SCREEN_COORD_FROM_WORLD_COORD, 0x34E82F05DF2974F5) // BOOL (float, float, float, float*, float*)
+CV_NATIVE(SET_SEETHROUGH, 0x7E08924259E08CE0)      // void (BOOL)
+CV_NATIVE(START_PARTICLE_FX_LOOPED_ON_ENTITY, 0x1AE42C1660FD6517) // int (const char*, Entity, 3 offset, 3 rot, float scale, BOOL x3)
+CV_NATIVE(START_PARTICLE_FX_LOOPED_AT_COORD, 0xE184F4F0DC5910E7) // int (const char*, float, float, float, float, float, float, float, BOOL, BOOL, BOOL, BOOL)
+CV_NATIVE(SET_PARTICLE_FX_LOOPED_COLOUR, 0x7F8F65877F88783B) // void (int, float r, float g, float b, BOOL)
+CV_NATIVE(STOP_PARTICLE_FX_LOOPED, 0x8F75998877616996) // void (int, BOOL)
+CV_NATIVE(USE_PARTICLE_FX_ASSET, 0x6C38AF3693A69A91) // void (const char*)
+CV_NATIVE(SET_TIME_SCALE, 0x1D408577D440E81E)      // void (float)
+CV_NATIVE(CREATE_OBJECT, 0x509D5878EB39E842)       // Object (Hash, float, float, float, BOOL, BOOL, BOOL)
+CV_NATIVE(PLACE_OBJECT_ON_GROUND_PROPERLY, 0x58A850EAEE20FAA3) // BOOL (Object)
+CV_NATIVE(CREATE_PED_INSIDE_VEHICLE, 0x7DD959874C1FD534) // Ped (Vehicle, int, Hash, int, BOOL, BOOL)
+CV_NATIVE(SET_PED_RELATIONSHIP_GROUP_HASH, 0xC80A74AC829DDD92) // void (Ped, Hash)
+CV_NATIVE(GET_PED_RELATIONSHIP_GROUP_HASH, 0x7DBDD04862D95F04) // Hash (Ped)
+CV_NATIVE(SET_PED_KEEP_TASK, 0x971D38760FBC02EF)   // void (Ped, BOOL)
+CV_NATIVE(SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, 0x9F8AA94D6D97DBF4) // void (Ped, BOOL)
+CV_NATIVE(SET_PED_COMBAT_ATTRIBUTES, 0x9F7794730795E019) // void (Ped, int, BOOL)
+CV_NATIVE(SET_ENTITY_NO_COLLISION_ENTITY, 0xA53ED5520C07654A) // void (Entity, Entity, BOOL thisFrameOnly)
+CV_NATIVE(SET_ENTITY_HAS_GRAVITY, 0x4A4722448F18EEF5) // void (Entity, BOOL)
+CV_NATIVE(SET_ENTITY_DYNAMIC, 0x1718DE8E3F2823CA) // void (Entity, BOOL)
+CV_NATIVE(ACTIVATE_PHYSICS, 0x710311ADF0E20730)    // void (Entity)
+CV_NATIVE(SET_MODEL_AS_NO_LONGER_NEEDED, 0xE532F5D78798DAAB) // void (Hash)
+CV_NATIVE(IS_MODEL_VALID, 0xC0296A2EDF545E92)      // BOOL (Hash)
+CV_NATIVE(REQUEST_NAMED_PTFX_ASSET, 0xB80D8756B4668AB6) // void (const char*)
+CV_NATIVE(HAS_NAMED_PTFX_ASSET_LOADED, 0x8702416E512EC454) // BOOL (const char*)
+CV_NATIVE(GET_PREV_WEATHER_TYPE_HASH_NAME, 0x564B884A05EC45A3)   // Hash ()
+CV_NATIVE(SET_WEATHER_TYPE_OVERTIME_PERSIST, 0xFB5045B7C42B75BF) // void (const char*, float seconds)
+CV_NATIVE(SET_WEATHER_TYPE_NOW_PERSIST, 0xED712CA327900C8A)      // void (const char*)
+CV_NATIVE(CLEAR_WEATHER_TYPE_PERSIST, 0xCCC39339BEF76CF5)        // void ()
+CV_NATIVE(SET_PED_DENSITY_MULTIPLIER_THIS_FRAME, 0x95E3D6257B166CF2) // void (float)
+CV_NATIVE(SET_SCENARIO_PED_DENSITY_MULTIPLIER_THIS_FRAME, 0x7A556143A1C03898) // void (float, float)
+CV_NATIVE(SET_VEHICLE_DENSITY_MULTIPLIER_THIS_FRAME, 0x245A6883D966D537) // void (float)
+CV_NATIVE(SET_RANDOM_VEHICLE_DENSITY_MULTIPLIER_THIS_FRAME, 0xB3B3359379FE77D3) // void (float)
+CV_NATIVE(TASK_HELI_MISSION, 0xDAD029E187A2BEB4)   // void (Ped, Vehicle, Vehicle, Ped, float, float, float, int, float, float, float, int, int, float, int)
+CV_NATIVE(CREATE_VEHICLE, 0xAF35D0D2583051B0)      // Vehicle (Hash, float, float, float, float, BOOL, BOOL, BOOL)
+CV_NATIVE(EXPLODE_VEHICLE, 0xBA71116ADF5B514C)     // void (Vehicle, BOOL, BOOL)
+CV_NATIVE(SET_HELI_BLADES_FULL_SPEED, 0xA178472EBB8AE60D) // void (Vehicle)
+CV_NATIVE(CONTROL_LANDING_GEAR, 0xCFC8BE9A5E1FE575) // void (Vehicle, int)
+CV_NATIVE(REQUEST_WEAPON_ASSET, 0x5443438F033E29C3) // void (Hash, int, int)
+CV_NATIVE(HAS_WEAPON_ASSET_LOADED, 0x36E353271F0E90EE) // BOOL (Hash)
+CV_NATIVE(CREATE_WEAPON_OBJECT, 0x9541D3CF0D398F36) // Object (Hash, int, float, float, float, BOOL, float, Any, Any, Any)
+#undef CV_NATIVE
+
+} // namespace gta

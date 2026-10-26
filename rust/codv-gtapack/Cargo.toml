@@ -1,0 +1,21 @@
+# The setup's GTA archive tool (the MW2 item in GTA's weapon wheel): reads the
+# player's own GTA V archives (keys from GTA5.exe, entries of update.rpf) and
+# writes CODV's DLC pack. Its own workspace: it depends on the pinned
+# rpf-archive-rs checkout (upstream/, tools/fetch-upstreams.ps1), which the
+# runtime never needs. tools/build-rust.ps1 builds it.
+[package]
+name = "codv-gtapack"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "codv-gtapack"
+path = "src/main.rs"
+
+[dependencies]
+rpf-archive = { path = "../../upstream/rpf-archive-rs" }
+memmap2 = "0.9.11"
+anyhow = "1"
+
+[workspace]

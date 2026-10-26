@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "notes": "CODV's own weapon table: Call of Duty-style handling for GTA V's guns. Values are CODV's, tuned for GTA peds (100 effective health). Units: metres, seconds, degrees, rounds per minute.",
+  "player": {
+    "sprint_seconds": 4.0,
+    "sprint_min": 1.0,
+    "sprint_regen_delay": 1.2,
+    "sprint_regen_rate": 1.0,
+    "sprint_multiplier": 1.2,
+    "walk_speed": 2.0,
+    "ads_move_scale": 0.6,
+    "crouch_spread_scale": 0.7,
+    "crouch_kick_scale": 0.85,
+    "air_spread_add": 4.0,
+    "regen_delay": 5.0,
+    "regen_seconds": 2.5,
+    "quick_jump_speed": 4.8,
+    "melee_damage": 150,
+    "melee_range": 2.0,
+    "melee_seconds": 0.65,
+    "trace_range": 350.0
+  },
+  "loadout": { "primary": "carbine", "secondary": "pistol" },
+  "weapons": [
+    {
+      "name": "carbine", "label": "Carbine", "gta": "weapon_carbinerifle", "class": "rifle",
+      "fire": "auto", "rpm": 750,
+      "damage": [30, 20], "range": [25, 45], "head": 1.4,
+      "mag": 30, "reserve": 120, "reload": 2.2, "reload_empty": 2.9,
+      "ads_time": 0.22, "sprint_out": 0.25, "raise": 0.45, "drop": 0.3,
+      "hip_spread": [2.5, 6.0], "ads_spread": 0.1, "bloom": 0.45, "bloom_decay": 7.0, "move_spread": 1.5,
+      "kick_pitch": [0.45, 0.7], "kick_yaw": [-0.3, 0.35], "ads_kick": 0.65, "kick_recover": 0.2,
+      "move": 1.0
+    },
+    {
+      "name": "assault_rifle", "label": "Assault Rifle", "gta": "weapon_assaultrifle", "class": "rifle",
+      "fire": "auto", "rpm": 630,
+      "damage": [35, 25], "range": [22, 42], "head": 1.4,
+      "mag": 30, "reserve": 120, "reload": 2.4, "reload_empty": 3.1,
+      "ads_time": 0.25, "sprint_out": 0.28, "raise": 0.5, "drop": 0.3,
+      "hip_spread": [3.0, 6.5], "ads_spread": 0.15, "bloom": 0.55, "bloom_decay": 6.5, "move_spread": 1.8,
+      "kick_pitch": [0.6, 0.95], "kick_yaw": [-0.45, 0.5], "ads_kick": 0.7, "kick_recover": 0.15,
+      "move": 0.97
+    },
+    {
+      "name": "burst_rifle", "label": "Burst Rifle", "gta": "weapon_specialcarbine", "class": "rifle",
+      "fire": "burst", "rpm": 900, "burst": 3, "burst_delay": 0.22,
+      "damage": [40, 30], "range": [30, 50], "head": 1.5,
+      "mag": 30, "reserve": 120, "reload": 2.3, "reload_empty": 3.0,
+      "ads_time": 0.24, "sprint_out": 0.27, "raise": 0.5, "drop": 0.3,
+      "hip_spread": [3.0, 6.5], "ads_spread": 0.08, "bloom": 0.5, "bloom_decay": 7.0, "move_spread": 1.8,
+      "kick_pitch": [0.5, 0.75], "kick_yaw": [-0.25, 0.3], "ads_kick": 0.6, "kick_recover": 0.3,
+      "move": 0.97
+    },
+    {
+      "name": "smg", "label": "SMG", "gta": "weapon_smg", "class": "smg",
+      "fire": "auto", "rpm": 900,
+      "damage": [30, 18], "range": [10, 25], "head": 1.2,
+      "mag": 30, "reserve": 150, "reload": 2.0, "reload_empty": 2.6,
+      "ads_time": 0.17, "sprint_out": 0.2, "raise": 0.4, "drop": 0.25,
+      "hip_spread": [2.0, 4.5], "ads_spread": 0.3, "bloom": 0.35, "bloom_decay": 8.0, "move_spread": 1.0,
+      "kick_pitch": [0.35, 0.6], "kick_yaw": [-0.45, 0.45], "ads_kick": 0.75, "kick_recover": 0.2,
+      "move": 1.06
+    },
+    {
+      "name": "machine_pistol", "label": "Machine Pistol", "gta": "weapon_microsmg", "class": "secondary",
+      "fire": "auto", "rpm": 1000,
+      "damage": [24, 14], "range": [8, 18], "head": 1.2,
+      "mag": 20, "reserve": 120, "reload": 1.7, "reload_empty": 2.2,
+      "ads_time": 0.15, "sprint_out": 0.15, "raise": 0.3, "drop": 0.2,
+      "hip_spread": [2.0, 4.0], "ads_spread": 0.6, "bloom": 0.4, "bloom_decay": 8.0, "move_spread": 0.8,
+      "kick_pitch": [0.4, 0.7], "kick_yaw": [-0.6, 0.6], "ads_kick": 0.8, "kick_recover": 0.2,
+      "move": 1.08
+    },
+    {
+      "name": "lmg", "label": "Light Machine Gun", "gta": "weapon_combatmg", "class": "lmg",
+      "fire": "auto", "rpm": 700,
+      "damage": [40, 30], "range": [30, 55], "head": 1.3,
+      "mag": 100, "reserve": 200, "reload": 6.0, "reload_empty": 7.0,
+      "ads_time": 0.38, "sprint_out": 0.4, "raise": 0.7, "drop": 0.4,
+      "hip_spread": [4.0, 8.0], "ads_spread": 0.2, "bloom": 0.6, "bloom_decay": 5.0, "move_spread": 2.5,
+      "kick_pitch": [0.55, 0.85], "kick_yaw": [-0.4, 0.45], "ads_kick": 0.6, "kick_recover": 0.1,
+      "move": 0.88, "ads_move": 0.9
+    },
+    {
+      "name": "shotgun", "label": "Pump Shotgun", "gta": "weapon_pumpshotgun", "class": "shotgun",
+      "fire": "semi", "rpm": 75, "pellets": 8,
+      "damage": [40, 10], "range": [5, 16], "head": 1.0,
+      "mag": 8, "reserve": 32, "reload": 0.5, "reload_round": 0.5,
+      "ads_time": 0.25, "sprint_out": 0.25, "raise": 0.45, "drop": 0.3,
+      "hip_spread": [5.0, 7.0], "ads_spread": 4.5, "bloom": 0.0, "bloom_decay": 6.0, "move_spread": 0.5,
+      "kick_pitch": [2.5, 3.5], "kick_yaw": [-0.8, 0.8], "ads_kick": 0.8, "kick_recover": 0.5,
+      "move": 1.0
+    },
+    {
+      "name": "sniper", "label": "Bolt Sniper", "gta": "weapon_sniperrifle", "class": "sniper",
+      "fire": "semi", "rpm": 48,
+      "damage": [98, 70], "range": [60, 120], "head": 1.5,
+      "mag": 5, "reserve": 25, "reload": 3.0, "reload_empty": 3.8,
+      "ads_time": 0.42, "sprint_out": 0.4, "raise": 0.7, "drop": 0.4,
+      "hip_spread": [8.0, 12.0], "ads_spread": 0.0, "bloom": 0.0, "bloom_decay": 6.0, "move_spread": 2.0,
+      "kick_pitch": [3.0, 4.0], "kick_yaw": [-1.0, 1.0], "ads_kick": 0.7, "kick_recover": 0.7,
+      "move": 0.95, "ads_move": 0.7
+    },
+    {
+      "name": "pistol", "label": "Pistol", "gta": "weapon_pistol", "class": "secondary",
+      "fire": "semi", "rpm": 450,
+      "damage": [40, 20], "range": [10, 25], "head": 1.4,
+      "mag": 12, "reserve": 48, "reload": 1.6, "reload_empty": 2.0,
+      "ads_time": 0.15, "sprint_out": 0.12, "raise": 0.3, "drop": 0.2,
+      "hip_spread": [2.0, 4.0], "ads_spread": 0.3, "bloom": 0.6, "bloom_decay": 8.0, "move_spread": 1.0,
+      "kick_pitch": [0.9, 1.3], "kick_yaw": [-0.4, 0.4], "ads_kick": 0.75, "kick_recover": 0.4,
+      "move": 1.1
+    },
+    {
+      "name": "magnum", "label": "Magnum", "gta": "weapon_pistol50", "class": "secondary",
+      "fire": "semi", "rpm": 240,
+      "damage": [55, 35], "range": [12, 28], "head": 1.4,
+      "mag": 9, "reserve": 36, "reload": 1.9, "reload_empty": 2.3,
+      "ads_time": 0.17, "sprint_out": 0.14, "raise": 0.35, "drop": 0.22,
+      "hip_spread": [2.5, 4.5], "ads_spread": 0.35, "bloom": 1.0, "bloom_decay": 6.0, "move_spread": 1.2,
+      "kick_pitch": [1.8, 2.4], "kick_yaw": [-0.6, 0.6], "ads_kick": 0.75, "kick_recover": 0.4,
+      "move": 1.08
+    }
+  ]
+}
