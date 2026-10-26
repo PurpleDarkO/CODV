@@ -6,7 +6,7 @@ noted with each release: a host and a runtime only work together on the same ABI
 
 ## [Unreleased]
 
-## [0.1.0] - unreleased
+## [0.1.0] - 2026-10-26
 
 First public release. Runtime ABI 10.
 
@@ -57,10 +57,16 @@ First public release. Runtime ABI 10.
 - Never in story missions, never raising the wanted level.
 
 ### Setup
-- `CODV Setup.cmd` (release) or `INSTALL.bat` (source) find GTA V (Steam, Rockstar Games Launcher, Epic) and
-  MW2 (Steam) automatically, import MW2 from the player's machine and install next to `GTA5.exe`.
+- `CODV Setup.cmd` opens CODV's setup window: it finds GTA V (Steam, Rockstar Games Launcher, Epic) and MW2
+  (Steam), imports MW2 from the player's own copy with a progress bar and installs next to `GTA5.exe`.
+  `INSTALL.bat` does the same from source.
+- The release carries `THIRD-PARTY-NOTICES.txt` (every Rust crate in the shipped binaries with its license)
+  and `SHA256SUMS.txt`.
 
 ### Known issues
 - Small hitches remain in some movement cases (car corners, low fences); tuning continues.
 - CODV's own missiles have no in-flight sound yet.
 - GTA V Enhanced and GTA Online are not supported.
+
+[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/PurpleDarkO/CODV/releases/tag/v0.1.0
