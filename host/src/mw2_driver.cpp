@@ -21,7 +21,7 @@ using gta::Call;
 namespace {
 // eControl ids.
 constexpr int kLookLR = 1, kLookUD = 2, kSprint = 21, kJump = 22, kEnter = 23, kAttack = 24, kAim = 25;
-constexpr int kMoveLR = 30, kMoveUD = 31, kDuck = 36, kNextCamera = 0;
+constexpr int kMoveLR = 30, kMoveUD = 31, kDuck = 36;
 using input::kLookBehind, input::kReload, input::kSelectWeapon, input::kWheelNext, input::kWheelPrev;
 // MW2's hull, metres (15 x 15 x 70 units).
 constexpr float kHull = 15.0f * 0.0254f, kHullHeight = 70.0f * 0.0254f;

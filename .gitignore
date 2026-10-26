@@ -1,5 +1,7 @@
 # Builds
 build/
+# Machine-local cargo settings (tools/build-release.py writes the path remaps there)
+/.cargo/
 target/
 **/target/
 out/

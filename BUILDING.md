@@ -34,9 +34,12 @@ Windows x64 only. The result is the same release folder and zip a published CODV
    administrator rights only if the GTA folder needs them. `INSTALL.bat -SkipBuild` reinstalls the last build.
 4. Optional: `py tools\check-data.py` checks every GTA weapon in `data/weapons.json` and the melee clip, crouch
    clipsets and sounds in `data/CodVHost.ini` against GTA's real lists.
-5. Set `RUSTFLAGS=--remap-path-prefix=<checkout>=.` so binaries do not carry your paths, rebuild, then
-   run `py tools\build-release.py --version <version>`. The release is written to
-   `build\release\CODV-<version>\` and its `.zip`.
+5. Release: run `py tools\build-release.py --version <version>`. The release is written to
+   `build\release\CODV-<version>\` and its `.zip`, with `THIRD-PARTY-NOTICES.txt` (every Rust crate in the
+   shipped binaries with its license, `tools\third-party-notices.py`) and `SHA256SUMS.txt`. rustc keeps source
+   paths in binaries: the first run writes a machine-local `.cargo\config.toml` (gitignored) that maps the
+   checkout and your user folder to neutral names, then asks you to rebuild (`BUILD.bat`) and run it again; it
+   refuses binaries that still hold either path, and any Call of Duty or GTA V data format.
 
 ## Layout
 
