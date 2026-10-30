@@ -16,6 +16,16 @@ GTA is the world. Every MW2 asset is read from the player's own copy at setup ti
 | Killstreaks | All ten of MW2's rewards, from the UAV to the Tactical Nuke, with their overlays, on spaced kill counts by default |
 | Setup | Finds GTA V and MW2, imports MW2 from the player's machine and installs next to `GTA5.exe` |
 
+## In 0.2.0
+
+| Area | What came |
+|---|---|
+| Movement | Reload while sprinting; sprint and aim, the last pressed wins; no invisible walls from loose debris or broken fences |
+| Weapons | A weapon switch cancels a reload at once (MW2's rule) |
+| Police | Juggernauts join the police at four and five stars (up to three), with an entrance and a death cinematic |
+| Killstreaks | The nuke ends the run (the streak and the held rewards start over), a round counter, an option for the nuke to kill the player; kills count in killstreak views; animals never count |
+| Menu | A new look for the CODV menu; CODV stays on while it is open |
+
 ## Next
 
 - Movement tuning: the remaining small hitches at car corners and low fences.

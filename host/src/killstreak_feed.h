@@ -38,6 +38,7 @@ struct Frame {
     std::uint32_t headshots = 0, longshots = 0; // of hostileKills (MW2's kill bonuses)
     float dt = 0.0f;
     ksremote::Settings look;
+    bool nukeKillsPlayer = false; // NukeKillsPlayer=1: MW2's nuke, its caller dies too
 };
 
 void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log);

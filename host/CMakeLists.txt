@@ -32,6 +32,7 @@ add_library(CodVLegacy SHARED
   src/killstreak_world.cpp
   src/killstreak_remote.cpp
   src/killstreak_units.cpp
+  src/police_juggernaut.cpp
   src/body_feed.cpp
   src/pose_hook.cpp
   src/gta_audio.cpp
@@ -39,6 +40,17 @@ add_library(CodVLegacy SHARED
   src/gta_audio_re.cpp
   src/gta_audio_dsp.cpp
 )
+# experimental/: modes still in the works, local only (in .gitignore, never published). Built in when the
+# folder is there; without it this is the public build.
+set(CODV_EXPERIMENTAL_DIR "${CMAKE_CURRENT_LIST_DIR}/../experimental")
+if(EXISTS "${CODV_EXPERIMENTAL_DIR}/host/experimental.h")
+  message(STATUS "CODV: building with experimental/")
+  file(GLOB CODV_EXPERIMENTAL_SOURCES CONFIGURE_DEPENDS "${CODV_EXPERIMENTAL_DIR}/host/*.cpp")
+  target_sources(CodVLegacy PRIVATE ${CODV_EXPERIMENTAL_SOURCES})
+  target_include_directories(CodVLegacy PRIVATE src "${CODV_EXPERIMENTAL_DIR}/host")
+  target_compile_definitions(CodVLegacy PRIVATE CODV_EXPERIMENTAL=1)
+  set(CODV_WITH_EXPERIMENTAL ON)
+endif()
 target_compile_features(CodVLegacy PRIVATE cxx_std_20)
 target_compile_definitions(CodVLegacy PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_include_directories(CodVLegacy PRIVATE include "${SHVDIR}/inc")
@@ -62,5 +74,9 @@ if(CODV_HOST_TESTS)
   target_compile_features(codv_host_tests PRIVATE cxx_std_20)
   target_compile_definitions(codv_host_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_include_directories(codv_host_tests PRIVATE include src)
+  if(CODV_WITH_EXPERIMENTAL)
+    target_include_directories(codv_host_tests PRIVATE "${CODV_EXPERIMENTAL_DIR}/host" "${CODV_EXPERIMENTAL_DIR}/tests")
+    target_compile_definitions(codv_host_tests PRIVATE CODV_EXPERIMENTAL=1)
+  endif()
   add_test(NAME codv_host_tests COMMAND codv_host_tests)
 endif()

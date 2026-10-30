@@ -329,7 +329,8 @@ HudResult UpdateHud(RuntimeBridge& runtime, const HudInput& in) {
     if (in.weaponBar) {
         CvHudDrawInput d{};
         d.size = sizeof(d);
-        d.flags = (in.thirdPerson ? CV_HUD_THIRD_PERSON : 0u) | (in.vehicle ? CV_HUD_VEHICLE : 0u);
+        d.flags = (in.thirdPerson ? CV_HUD_THIRD_PERSON : 0u) | (in.vehicle ? CV_HUD_VEHICLE : 0u) |
+                  (in.cinematic ? CV_HUD_CINEMATIC : 0u);
         d.lock = in.lock;
         d.lock_xy[0] = in.lockXY[0], d.lock_xy[1] = in.lockXY[1];
         hudrender::LastBackbuffer(d.width, d.height);

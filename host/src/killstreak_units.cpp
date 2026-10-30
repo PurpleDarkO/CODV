@@ -476,7 +476,8 @@ void Units::TickNuke(RuntimeBridge& runtime, Ped player, CvStreakView& view) {
     else if (orange > 0.0f) Call<void>(gta::DRAW_RECT, 0.5f, 0.5f, 1.0f, 1.0f, 200, 90, 30, static_cast<int>(orange * 255.0f), FALSE);
     if (!nuke_.killed && t >= ksrules::kNukeDeathMs) {
         nuke_.killed = true;
-        // nukeDeath: everyone dies (CODV spares the player) and the vehicles go up.
+        // nukeDeath: everyone dies (CODV spares the player unless NukeKillsPlayer=1, MW2's rule) and the
+        // vehicles go up (the player's own too when it kills the player).
         const V3 p = Coords(player);
         static int peds[1024], vehicles[1024];
         const int n = worldGetAllPeds(peds, 1024);
@@ -485,7 +486,7 @@ void Units::TickNuke(RuntimeBridge& runtime, Ped player, CvStreakView& view) {
             if (q == player || Call<BOOL>(gta::IS_PED_A_PLAYER, q)) continue;
             if (ksworld::Distance(Coords(q), p) <= ksrules::kNukeRange) Call<void>(gta::SET_ENTITY_HEALTH, q, 0, 0, 0);
         }
-        const Vehicle own = Call<Vehicle>(gta::GET_VEHICLE_PED_IS_IN, player, FALSE);
+        const Vehicle own = nukeKillsPlayer_ ? 0 : Call<Vehicle>(gta::GET_VEHICLE_PED_IS_IN, player, FALSE);
         const int m = worldGetAllVehicles(vehicles, 1024);
         int blown = 0;
         for (int i = 0; i < m && blown < 40; ++i) {
@@ -493,6 +494,10 @@ void Units::TickNuke(RuntimeBridge& runtime, Ped player, CvStreakView& view) {
             if (v == own || ksworld::Distance(Coords(v), p) > ksrules::kNukeRange * 0.6f) continue;
             Call<void>(gta::EXPLODE_VEHICLE, v, TRUE, FALSE);
             ++blown;
+        }
+        if (nukeKillsPlayer_) {
+            Call<void>(gta::SET_ENTITY_HEALTH, player, 0, 0, 0);
+            util::Logf(log_, "CODV: the tactical nuke took the player too (NukeKillsPlayer=1)");
         }
     }
     // Back to normal speed over 2 s, then done.

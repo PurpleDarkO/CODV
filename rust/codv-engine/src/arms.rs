@@ -16,8 +16,12 @@
 //! times the hit location's multiplier (MW2's global table times the weapon's).
 use crate::player::{Mw2Player, WeaponMoveFacts};
 use codv_mw2data::table::{HITLOCS, Row, Table};
+use playerstate_iw4::pm_flags;
 use weapon_iw4 as w;
 use weapon_iw4::{GunKickRange, ViewKickRange, WeaponCombatFacts, WeaponHandState};
+
+/// CODV's reload while sprinting: the sprint's speed while the reload goes on.
+pub const RELOAD_SPRINT_SPEED: f32 = 0.88;
 
 /// One MW2 weapon, ready for the state machine.
 #[derive(Clone, Debug)]
@@ -309,6 +313,7 @@ impl Arsenal {
                         melee_delay_ms: facts.melee_delay_ms,
                         melee_charge_delay_ms: facts.melee_charge_delay_ms,
                         hold_sprint: false,
+                        reload_sprint: false,
                     },
                     kick: kick(r),
                     strings: r.strings.clone(),
@@ -426,6 +431,8 @@ pub struct Gunner {
     old_angles: [i32; 3],
     rng: u32,
     time: i32,
+    /// CODV's reload while sprinting (off: MW2's sprint waits for the reload, CODV's 0.1.0 rule).
+    pub reload_sprint: bool,
 }
 
 fn short(a: f32) -> i32 {
@@ -466,6 +473,7 @@ impl Gunner {
             old_angles: [0; 3],
             rng: 0x2545_F491,
             time: 1_000_000,
+            reload_sprint: false,
         }
     }
 
@@ -598,8 +606,18 @@ impl Gunner {
         let mut allow = g.facts.ads_allow_facts();
         allow.clip_index = w::clip_table_key(allow.clip_index, self.hands[0].weapon);
         moves.ads_allowed = w::is_ads_allowed(&player.ps, &allow, &player.ps.ammoclip, 0);
-        moves.hold_sprint = w::WeaponState::from_i32(self.hands[0].weaponstate).is_ok_and(|s| s.is_reload_family());
+        let reloading = self.reloading();
+        moves.hold_sprint = reloading && !self.reload_sprint;
+        moves.reload_sprint = reloading && self.reload_sprint;
+        if moves.reload_sprint && player.ps.pm_flags & pm_flags::SPRINTING != 0 {
+            moves.move_speed_scale *= RELOAD_SPRINT_SPEED;
+        }
         player.weapon = moves;
+    }
+
+    /// The held weapon is in its reload (start, loop, end).
+    pub fn reloading(&self) -> bool {
+        w::WeaponState::from_i32(self.hands[0].weaponstate).is_ok_and(|s| s.is_reload_family())
     }
 
     /// After the player's pmove: one tick of the held weapon with the
@@ -647,7 +665,10 @@ impl Gunner {
         ps.spread_override_state = state.spread_override_state;
         self.old_angles = angles;
 
-        // The weapon tick (sim/combat.rs's WeaponCmd).
+        // The weapon tick (sim/combat.rs's WeaponCmd). Reloading while sprinting: the weapon is told
+        // the player is not sprinting (weapon_iw4 would drop the reload for the sprint-in); the sprint
+        // comes back to the playerstate after the tick, so the gun goes to its sprint once the reload ends.
+        let sprint_hidden = self.reload_sprint && self.reloading() && ps.pm_flags & pm_flags::SPRINTING != 0;
         let (clip, stock) = self.ammo_of(held);
         self.hands[0].clip = clip;
         self.hands[0].stock = stock;
@@ -659,7 +680,7 @@ impl Gunner {
             buttons,
             old_buttons: self.old_buttons,
             cmd_weapon: target as u16,
-            pm_flags: ps.pm_flags,
+            pm_flags: if sprint_hidden { ps.pm_flags & !pm_flags::SPRINTING } else { ps.pm_flags },
             weap_flags: ps.weap_flags,
             pm_type: ps.pm_type,
             e_flags: ps.e_flags,
@@ -719,7 +740,7 @@ impl Gunner {
         ps.weapon_delay = hand.weapon_delay;
         ps.weap_anim = hand.weap_anim;
         ps.weapon_restrict_kick_time = hand.weapon_restrict_kick_time;
-        ps.pm_flags = cmd.pm_flags;
+        ps.pm_flags = cmd.pm_flags | if sprint_hidden { pm_flags::SPRINTING } else { 0 };
         ps.weap_flags = cmd.weap_flags;
         // Ammo: the hand's rounds belong to the weapon it held when the tick began.
         self.set_ammo(held, hand.clip, hand.stock);

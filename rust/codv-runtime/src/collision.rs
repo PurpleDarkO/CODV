@@ -154,6 +154,18 @@ pub enum Template {
     Ready(Arc<Vec<codv_gtaworld::Tri>>),
     /// Unreadable or implausible: the model box for good.
     Box,
+    /// Read fine, with nothing a ped collides with: GTA lets people walk through it (a dropped
+    /// weapon, debris), so an object has no collision either (a vehicle keeps its box).
+    Passable,
+}
+
+/// Why a model's collision is not its triangles.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TemplateError {
+    /// Nothing in GTA's bound collides with a ped (`Template::Passable`).
+    Passable(String),
+    /// Unreadable or implausible (`Template::Box`).
+    Box(String),
 }
 
 /// Read the collision of `model` from the live instance `instance`; its
@@ -169,16 +181,29 @@ pub struct TemplateRequest {
 /// The bound triangles of `r`'s instance, if they are plausible for the
 /// model: inside its box grown by 0.5 m (a freed and reused instance reads
 /// as garbage, or as another model).
-pub fn read_template(r: &TemplateRequest) -> Result<Vec<codv_gtaworld::Tri>, String> {
-    let tris = codv_gtaworld::live::instance_model(r.instance)?;
+pub fn read_template(r: &TemplateRequest) -> Result<Vec<codv_gtaworld::Tri>, TemplateError> {
+    use codv_gtaworld::live::InstanceError;
+    let tris = match codv_gtaworld::live::instance_model(r.instance) {
+        Ok(t) => t,
+        Err(e @ InstanceError::NoPedCollision { .. }) => return Err(TemplateError::Passable(e.to_string())),
+        Err(e) => return Err(TemplateError::Box(e.to_string())),
+    };
+    check_template(tris, r)
+}
+
+/// `tris` as a template of `r`'s model, if plausible.
+fn check_template(
+    tris: Vec<codv_gtaworld::Tri>,
+    r: &TemplateRequest,
+) -> Result<Vec<codv_gtaworld::Tri>, TemplateError> {
     let margin = 0.5;
     let inside =
         tris.iter().flat_map(|t| t.v).all(|p| (0..3).all(|k| p[k] >= r.lo[k] - margin && p[k] <= r.hi[k] + margin));
     if !inside {
-        return Err(format!("{} triangles outside the model box", tris.len()));
+        return Err(TemplateError::Box(format!("{} triangles outside the model box", tris.len())));
     }
     if tris.len() > 20_000 {
-        return Err(format!("{} triangles is too many for a mover", tris.len()));
+        return Err(TemplateError::Box(format!("{} triangles is too many for a mover", tris.len())));
     }
     Ok(tris)
 }
@@ -290,7 +315,11 @@ fn work(shared: Arc<(Mutex<Shared>, Condvar)>, log: Arc<Log>) {
                             log(&format!("movers: model {:08x}: {} triangles from GTA's bound", r.model, tris.len()));
                             Template::Ready(Arc::new(tris))
                         }
-                        Err(e) => {
+                        Err(TemplateError::Passable(e)) => {
+                            log(&format!("movers: model {:08x}: passable, no collision in GTA ({e})", r.model));
+                            Template::Passable
+                        }
+                        Err(TemplateError::Box(e)) => {
                             log(&format!("movers: model {:08x}: model box ({e})", r.model));
                             Template::Box
                         }
@@ -413,6 +442,14 @@ impl Streamer {
         s.template_requests.push(request);
         cv.notify_all();
         Template::Pending
+    }
+
+    /// Tests: a model's template as if the worker had read it.
+    #[cfg(test)]
+    pub fn set_template(&self, model: u32, t: Template) {
+        if let Ok(mut s) = self.shared.0.lock() {
+            s.templates.insert(model, t);
+        }
     }
 
     pub fn area(&self) -> Option<Arc<Area>> {

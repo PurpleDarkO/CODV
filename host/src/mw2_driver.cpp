@@ -507,6 +507,14 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
     r.nextWeapon = Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kWheelNext) ||
                    Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kWheelPrev) ||
                    Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kSelectWeapon);
+    // The CODV menu is open: the keys and sticks drive the menu, MW2's player stands still.
+    if (inputFrozen_) {
+        const float dt0 = r.dt;
+        const bool mouse = r.mouse;
+        r = mw2input::Raw{};
+        r.dt = dt0;
+        r.mouse = mouse;
+    }
     mapper_.SetMoveFlags(last_.flags);
     CvMoveInput in = mapper_.Map(r, s.input, kickPitch, kickYaw);
     // Auto ladder: pushing forward against a wall for a moment tries GTA's ladder task there; when one
@@ -537,6 +545,41 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
         }
     } else {
         stuckSince_ = 0;
+    }
+    // Diagnostics: any push (forward, back, sideways, a jump) that has not moved the player 10 cm in 1.5 s
+    // is logged with MW2's state (on the ground or not, waiting for the map, the stance, the fall speed) and
+    // what GTA has ahead of the feet: the case above misses a player wedged in the air or held sideways.
+    const bool pushing = std::abs(in.forward) > 60 || std::abs(in.right) > 60 || (in.buttons & CV_MW2_JUMP);
+    if (active_ && pushing && !(last_.flags & CV_MOVE_MANTLING)) {
+        const float moved = std::hypot(std::hypot(last_.position[0] - pinnedAt_[0], last_.position[1] - pinnedAt_[1]),
+                                       last_.position[2] - pinnedAt_[2]);
+        if (!pinnedSince_ || moved > 0.1f) {
+            pinnedSince_ = now;
+            for (int i = 0; i < 3; ++i) pinnedAt_[i] = last_.position[i];
+        } else if (now - pinnedSince_ >= 1500 && now - pinnedLogAt_ >= 3000) {
+            pinnedLogAt_ = now;
+            const unsigned f = last_.flags;
+            char line[320];
+            int n = std::snprintf(line, sizeof(line),
+                                  "CODV: not moving at %.2f %.2f %.2f heading %.0f, push fwd %d right %d%s:%s%s%s%s stance %u, vz %.2f;",
+                                  last_.position[0], last_.position[1], last_.position[2], last_.heading,
+                                  static_cast<int>(in.forward), static_cast<int>(in.right),
+                                  (in.buttons & CV_MW2_JUMP) ? " jump" : "", (f & CV_MOVE_ON_GROUND) ? " ground" : " AIR",
+                                  (f & CV_MOVE_WAITING) ? " WAITING" : "", (f & CV_MOVE_FREED) ? " freed" : "",
+                                  (f & CV_MOVE_SNAGGED) ? " snagged" : "", static_cast<unsigned>(last_.stance),
+                                  last_.velocity[2]);
+            for (const float dz : {0.05f, 0.7f, 1.6f}) {
+                const Ahead a = ProbeAhead(player, pedOffset_, dz, 1.0f);
+                if (n > 0 && n < static_cast<int>(sizeof(line)))
+                    n += std::snprintf(line + n, sizeof(line) - n, " %.2fm=%c", dz, a.kind);
+                if (a.kind != '-' && n > 0 && n < static_cast<int>(sizeof(line)))
+                    n += std::snprintf(line + n, sizeof(line) - n, "(%.2f 0x%08X)", a.dist, a.model);
+            }
+            util::Logf(log_, "%s", line);
+            Note(now, "NOT MOVING %s (see the log)", (f & CV_MOVE_ON_GROUND) ? "on the ground" : "in the air");
+        }
+    } else {
+        pinnedSince_ = 0;
     }
     if (active_ && (last_.flags & CV_MOVE_ON_GROUND) && !(last_.flags & CV_MOVE_MANTLING) && in.forward > 60 &&
         speed < kPushSpeed && !leaning) {

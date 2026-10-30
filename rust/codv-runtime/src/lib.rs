@@ -152,6 +152,9 @@ pub const CV_OPT_KS_SPACED: u32 = 44;
 /// CODV's weapon sets (1): up to three random guns behind each number key, the key again for the
 /// group's next; 0: one gun per key (MW2's two plus the sniper and the launcher).
 pub const CV_OPT_WEAPON_SETS: u32 = 45;
+/// CODV's reload while sprinting (1, the default): a sprint no longer waits for the reload, which goes
+/// on at a slightly slower sprint; 0: the sprint starts once the reload ends (CODV 0.1.0).
+pub const CV_OPT_RELOAD_SPRINT: u32 = 46;
 /// CODV's sprint refill (30% faster than MW2's: the meter was rarely full again).
 const SPRINT_RECHARGE: f32 = 1.3;
 /// CODV's default sprint speed scale: a little over MW2's 1.5.
@@ -340,6 +343,8 @@ struct Inner {
     sprint_speed: f32,
     /// MW2's jump slowdown (CV_OPT_JUMP_SLOWDOWN).
     jump_slowdown: bool,
+    /// CODV's reload while sprinting (CV_OPT_RELOAD_SPRINT).
+    reload_sprint: bool,
     /// CODV's parkour (CV_OPT_AUTO_VAULT, CV_OPT_MANTLE_SPEED, CV_OPT_HIGH_CLIMB, CV_OPT_DIVE).
     auto_vault: bool,
     mantle_speed: f32,
@@ -556,6 +561,7 @@ pub unsafe extern "C" fn cv_create(info: *const CvCreateInfo) -> *mut c_void {
                 slide: true,
                 sprint_speed: SPRINT_SPEED,
                 jump_slowdown: false,
+                reload_sprint: true,
                 auto_vault: true,
                 mantle_speed: 1.8,
                 high_climb: true,
@@ -843,6 +849,7 @@ pub unsafe extern "C" fn cv_set_option(rt: *mut c_void, id: u32, value: f32) -> 
             }
             CV_OPT_SLIDE => inner.slide = value != 0.0,
             CV_OPT_JUMP_SLOWDOWN => inner.jump_slowdown = value != 0.0,
+            CV_OPT_RELOAD_SPRINT => inner.reload_sprint = value != 0.0,
             CV_OPT_AUTO_VAULT => inner.auto_vault = value != 0.0,
             CV_OPT_HIGH_CLIMB => inner.high_climb = value != 0.0,
             CV_OPT_DIVE => inner.dive = value != 0.0,
@@ -1153,6 +1160,10 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
         // MW2's weapon: its ADS and movement facts into pmove, then one tick
         // after pmove with the same buttons (iw4L's sim order).
         if let Some(arms) = inner.arms.as_mut() {
+            if input.weapon_request != 0 && arms.gunner.as_ref().is_some_and(|g| g.reloading()) {
+                (rt.log)("weapon switch asked mid-reload: the reload is cancelled");
+            }
+            arms.reload_sprint = inner.reload_sprint;
             arms.before_step(&mut st.player, input.weapon_request);
         }
         // The knife or the frag on the trigger (number keys): pmove and the weapon see MW2's buttons.
@@ -1239,7 +1250,13 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
             inner.explosions.push(grenade_report(st.frame, &e, CV_GRENADE_EXPLODED));
         }
         if let Some(arms) = inner.arms.as_mut() {
-            out.kick = arms.after_step(&mut st.player, input.msec, input.buttons, (input.forward, input.right));
+            // A sprint over aim: the weapon is not aiming either.
+            let buttons = if st.player.sprint_over_ads {
+                input.buttons & !codv_engine::player::button::ADS
+            } else {
+                input.buttons
+            };
+            out.kick = arms.after_step(&mut st.player, input.msec, buttons, (input.forward, input.right));
             let mut notes = Vec::new();
             if let (Some(vm), Some(frame)) = (inner.vm.as_mut(), arms.last.as_ref()) {
                 // An offhand throw shows the grenade's viewmodel (pin, cook, throw).
@@ -2099,6 +2116,8 @@ pub struct CvHudQuad {
 pub const CV_HUD_THIRD_PERSON: u32 = 1;
 /// ABI 10: GTA has the player in a vehicle: MW2's HUD without the weapon bar, sprint meter and compass.
 pub const CV_HUD_VEHICLE: u32 = 2;
+/// A host cinematic has the view (a Juggernaut's entrance): only the splashes are drawn.
+pub const CV_HUD_CINEMATIC: u32 = 4;
 /// The hit marker's sound alias (_damagefeedback.gsc playlocalsound "MP_hit_alert").
 pub const HIT_ALERT_ALIAS: &str = "mp_hit_alert";
 /// CvHudQuad flags: the quad's alpha is masked by the image in bits 8.. (its
@@ -2179,6 +2198,7 @@ pub unsafe extern "C" fn cv_mw2_hud_draw(
             scoped: inner.scoped && !vehicle,
             javelin: javelin.filter(|_| !vehicle),
             vehicle,
+            cinematic: input.flags & CV_HUD_CINEMATIC != 0,
         };
         // Live grenades relative to the eye, IW4 units: CODV's own, and GTA's the host found.
         let ps = &st.player.ps;
@@ -2331,6 +2351,9 @@ pub const CV_STREAK_ALLOWED: u32 = 1;
 pub const CV_STREAK_DIED: u32 = 2;
 pub const CV_STREAK_ACTIVATE: u32 = 4;
 pub const CV_STREAK_RESET: u32 = 8;
+/// The Tactical Nuke is over, its blast's kills counted: the streak starts again from zero and the
+/// rewards still held are cleared (MW2 ends the match on it).
+pub const CV_STREAK_NUKE_OVER: u32 = 16;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -2476,6 +2499,19 @@ pub unsafe extern "C" fn cv_killstreak_step(
                 }
             }
         }
+        // The Tactical Nuke over (the host says so once its blast's kills are in): the run ends, as MW2
+        // ends the match on it; the count starts again from zero and the rewards still held are gone.
+        if input.flags & CV_STREAK_NUKE_OVER != 0 {
+            let (streak, lost) = (inner.streaks.streak, inner.streaks.start_over());
+            let round = inner.mw2hud.as_mut().map(|h| {
+                h.score.start_over();
+                h.score.round()
+            });
+            let round = round.map_or(String::new(), |r| format!("; round {r}"));
+            (rt.log)(&format!(
+                "killstreak: the nuke is over: the streak starts again (was {streak} kills, {lost} unused rewards cleared{round})"
+            ));
+        }
         let next = inner.streaks.next_kills().filter(|_| inner.streaks.enabled);
         if let Some(h) = inner.mw2hud.as_mut() {
             h.score.next = next;
@@ -2604,6 +2640,38 @@ pub unsafe extern "C" fn cv_play_alias(rt: *mut c_void, alias: *const c_char) ->
         let name = unsafe { CStr::from_ptr(alias) }.to_string_lossy().to_ascii_lowercase();
         let Ok(mut a) = rt.audio.lock() else { return 0 };
         a.as_mut().map_or(0, |a| a.play(&name) as u32)
+    })
+}
+
+/// The host's own splash in MW2's killstreak splash (a Juggernaut's entrance): `title` (UTF-8, shown
+/// as given) with its glow `glow` (RGBA 0..1; null: MW2's orange) and `description` under it (may be
+/// null). Returns 1 when queued, 0 without the import's HUD. An addition to ABI 10 (optional export).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_mw2_splash(
+    rt: *mut c_void,
+    title: *const c_char,
+    description: *const c_char,
+    glow: *const f32,
+) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        if title.is_null() {
+            return 0;
+        }
+        let title = unsafe { CStr::from_ptr(title) }.to_string_lossy().into_owned();
+        let description = if description.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(description) }.to_string_lossy().into_owned()
+        };
+        let glow = if glow.is_null() {
+            [1.0, 0.55, 0.12, 1.0]
+        } else {
+            let g = unsafe { std::slice::from_raw_parts(glow, 4) };
+            [g[0], g[1], g[2], g[3]].map(|c| if c.is_finite() { c.clamp(0.0, 1.0) } else { 1.0 })
+        };
+        let Ok(mut lock) = rt.inner.lock() else { return 0 };
+        lock.mw2hud.as_mut().map_or(0, |h| h.custom_splash(&title, &description, glow) as u32)
     })
 }
 
@@ -3438,6 +3506,33 @@ mod tests {
     }
 
     #[test]
+    fn the_nuke_over_counts_its_kills_then_starts_the_streak_over() {
+        let rt = create();
+        let step = |flags: u32, kills: u32| {
+            let input = CvStreakInput {
+                size: size_of::<CvStreakInput>() as u32,
+                flags,
+                hostile_kills: kills,
+                ..Default::default()
+            };
+            let mut out = CvStreakOutput { size: size_of::<CvStreakOutput>() as u32, ..Default::default() };
+            assert_eq!(unsafe { cv_killstreak_step(rt, &input, &mut out) }, 1);
+            out
+        };
+        // Three kills: a UAV held. The nuke's blast kills count as the player's...
+        let o = step(0, 3);
+        assert_eq!((o.streak, o.held), (3, 1));
+        let o = step(0, 4);
+        assert_eq!(o.streak, 7, "the blast's kills are counted");
+        // ...then, with the nuke over, the streak starts again and nothing is held.
+        let o = step(CV_STREAK_NUKE_OVER, 0);
+        assert_eq!((o.streak, o.held, o.top), (0, 0, 0));
+        let o = step(0, 3);
+        assert_eq!((o.streak, o.earned), (3, killstreaks::UAV), "back to the first reward");
+        unsafe { cv_destroy(rt) };
+    }
+
+    #[test]
     fn killstreaks_through_the_c_abi() {
         let rt = create();
         let step = |flags: u32, kills: u32| {
@@ -3560,6 +3655,8 @@ mod tests {
             assert_eq!(cv_set_option(rt, CV_OPT_BLOOD, 0.0), 1);
             assert_eq!(cv_set_option(rt, CV_OPT_KILL_FEEDBACK, 0.0), 1);
             assert_eq!(cv_set_option(rt, CV_OPT_JUMP_SLOWDOWN, 1.0), 1);
+            assert_eq!(cv_set_option(rt, CV_OPT_RELOAD_SPRINT, 0.0), 1);
+            assert_eq!(cv_set_option(rt, CV_OPT_RELOAD_SPRINT, 1.0), 1);
             assert_eq!(cv_set_option(rt, CV_OPT_MANTLE_SPEED, 2.0), 1);
             assert_eq!(cv_set_option(rt, CV_OPT_MANTLE_SPEED, 9.0), 0, "out of range");
             assert_eq!(cv_set_option(rt, CV_OPT_SLIDE_BOOST, 1.5), 1);

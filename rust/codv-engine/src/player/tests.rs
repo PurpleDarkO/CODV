@@ -84,6 +84,30 @@ fn sprint_is_faster_and_runs_out_after_four_seconds() {
     assert!(!outs.last().unwrap().sprinting, "the sprint meter runs out");
 }
 
+/// Sprint over aim: the aim held, a sprint press sprints (MW2 kept walking); the aim is back once the
+/// sprint ends with the button still held.
+#[test]
+fn a_sprint_pressed_while_aiming_wins_and_the_aim_comes_back_after() {
+    let w = floor();
+    let mut p = settled(&w);
+    let aim = MoveInput { msec: MS, forward: 127, buttons: button::ADS, ..Default::default() };
+    run(&mut p, &w, aim, 20);
+    assert!(!p.sprint_over_ads);
+    let both = MoveInput { buttons: button::ADS | button::SPRINT, ..aim };
+    let o = *run(&mut p, &w, both, 40).last().unwrap();
+    assert!(o.sprinting, "the sprint wins over the aim: {o:?}");
+    assert!(p.sprint_over_ads);
+    // Stop running, the aim still held: the sprint ends and the aim is back.
+    let still = MoveInput { forward: 0, buttons: button::ADS, ..aim };
+    let o = *run(&mut p, &w, still, 40).last().unwrap();
+    assert!(!o.sprinting && !p.sprint_over_ads, "aiming again: {o:?}");
+    // Let go of the aim mid-sprint and press it again: MW2's, the aim ends the sprint.
+    run(&mut p, &w, both, 40);
+    run(&mut p, &w, MoveInput { buttons: button::SPRINT, ..aim }, 5);
+    let o = *run(&mut p, &w, both, 10).last().unwrap();
+    assert!(!p.sprint_over_ads && !o.sprinting, "a fresh aim press ends the sprint: {o:?}");
+}
+
 #[test]
 fn sprint_meter_drains_and_recharges_and_the_speed_scale_applies() {
     let w = floor();

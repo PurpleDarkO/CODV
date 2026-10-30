@@ -1,9 +1,11 @@
 #pragma once
-// In-game settings menu, drawn with GTA's rect/text natives. MenuKey (` / ') or
+// In-game settings menu, drawn with GTA's rect/text natives. MenuKey (+) or
 // Back + LB opens it. Each item is one [CodV] INI key, saved the moment it
 // changes and applied live. Section items group the ones after them: the first
 // page lists the items before any section and the sections; a section opens on
-// right / A / Enter, and B / Backspace goes back (then closes).
+// right / A / Enter, and B / Backspace goes back (then closes). Action items do
+// something when pressed (right / A / Enter) and save nothing. Each item may carry
+// a line of help, shown under the list while it is selected.
 //
 // The model (items, stepping, text) is plain C++ so host/tests/host_tests.cpp
 // checks it without GTA; menu.cpp draws it and reads input.
@@ -19,15 +21,29 @@
 namespace menu {
 
 struct Item {
-    enum class Kind { Flag, Number, Section } kind = Kind::Flag;
+    enum class Kind { Flag, Number, Section, Action } kind = Kind::Flag;
     std::string label, key;
+    std::string help; // shown under the list while selected
     float value = 0, lo = 0, hi = 1, step = 1;
     std::string format = "%.2f";
     std::vector<std::string> names;   // Choice items: the name of each value 0..n-1
     std::function<void(float)> apply; // live effect of a new value
 
+    // The value column: On / Off, the choice's name, the number; nothing for sections and actions.
+    std::string Value() const {
+        if (kind == Kind::Section || kind == Kind::Action) return {};
+        if (kind == Kind::Flag) return value != 0 ? "On" : "Off";
+        if (!names.empty()) {
+            const auto i = static_cast<std::size_t>(std::clamp(value, 0.0f, static_cast<float>(names.size() - 1)));
+            return names[i];
+        }
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), format.c_str(), value);
+        return buf;
+    }
     std::string Text() const {
         if (kind == Kind::Section) return label + "  >";
+        if (kind == Kind::Action) return label;
         if (kind == Kind::Flag) return label + ": " + (value != 0 ? "On" : "Off");
         if (!names.empty()) {
             const auto i = static_cast<std::size_t>(std::clamp(value, 0.0f, static_cast<float>(names.size() - 1)));
@@ -40,6 +56,7 @@ struct Item {
     // dir: -1 / +1. Flags toggle either way. Returns true when the value changed.
     bool Step(int dir) {
         if (kind == Kind::Section) return false;
+        if (kind == Kind::Action) return dir > 0; // pressed: the caller runs it (nothing to save)
         const float before = value;
         if (kind == Kind::Flag) value = value != 0 ? 0.0f : 1.0f;
         else if (!names.empty()) value = static_cast<float>((static_cast<int>(value) + dir + static_cast<int>(names.size())) %
@@ -78,6 +95,13 @@ inline Item Section(std::string label) {
     return i;
 }
 
+// Something to do on right / A / Enter (a test, a reset): `apply` runs; nothing is saved.
+inline Item Action(std::string label, std::function<void(float)> apply) {
+    Item i;
+    i.kind = Item::Kind::Action, i.label = std::move(label), i.apply = std::move(apply);
+    return i;
+}
+
 // A Number whose values 0..n-1 show as names (wraps around).
 inline Item Choice(std::string label, std::string key, int value, std::vector<std::string> names,
                    std::function<void(float)> apply = {}) {
@@ -110,6 +134,13 @@ struct Model {
                 out.push_back(i);
         }
         return out;
+    }
+    // Items in the section at `index` (its page's length).
+    int SectionSize(int index) const {
+        int n = 0;
+        for (int i = index + 1; i < static_cast<int>(items.size()) && items[static_cast<std::size_t>(i)].kind != Item::Kind::Section; ++i)
+            ++n;
+        return n;
     }
     std::string Title() const {
         return page >= 0 && page < static_cast<int>(items.size()) ? items[static_cast<std::size_t>(page)].label : "CODV";

@@ -38,6 +38,7 @@ struct HudInput {
     bool vehicle = false;     // GTA has the player in a vehicle: MW2's HUD without the gun's parts
     bool crosshair = true;    // the player's crosshair setting
     bool weaponBar = true;    // MW2's weapon bar, hit marker, damage arrows, grenade indicator (Mw2Hud)
+    bool cinematic = false;   // a host cinematic has the view: only MW2's splashes
     std::vector<std::array<float, 3>> grenades; // GTA's live grenades near the player (world metres)
     // Killstreak markers on screen (backbuffer pixels, the image's centre), drawn with MW2's images.
     struct Marker {

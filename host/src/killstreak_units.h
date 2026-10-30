@@ -50,7 +50,10 @@ public:
     void Tick(RuntimeBridge& runtime, Ped player, CvStreakView& view, std::uint32_t& give);
     void Stop();
     bool NukeInbound() const { return nuke_.on; }
-    // The helicopter, the sentry, the airstrike's jets or the nuke is out (their kills are the player's).
+    // MW2's nuke kills its caller too (NukeKillsPlayer=1); CODV spares the player by default.
+    void SetNukeKillsPlayer(bool on) { nukeKillsPlayer_ = on; }
+    // The helicopter, the sentry, the airstrike's jets or the nuke is out (their kills are the player's;
+    // the nuke's are counted before the streak starts over, CV_STREAK_NUKE_OVER).
     bool Attacking() const { return heli_.on || sentry_.on || strikePending_ || !jets_.empty() || nuke_.on; }
 
 private:
@@ -126,6 +129,7 @@ private:
     bool strikePending_ = false;
     NukeState nuke_;
     Aftermath after_;
+    bool nukeKillsPlayer_ = false;
 };
 
 } // namespace ksunits

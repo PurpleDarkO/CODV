@@ -57,6 +57,8 @@ public:
     // F5c: a killstreak's camera takes over (true) or gives the view back to MW2's eye (false);
     // the player stays frozen where it is meanwhile.
     void Suspend(bool on);
+    // The CODV menu is open: MW2 keeps the player and the view, with no input (no move, look, fire).
+    void FreezeInput(bool on) { inputFrozen_ = on; }
     bool Active() const { return active_; }
     // GTA has the player only for a ladder or a skydive: MW2's HUD stays on screen.
     bool Borrowed() const { return borrowed_; }
@@ -124,6 +126,8 @@ private:
     DWORD pushSince_ = 0;         // MW2 has pushed forward against something since then (auto ladder)
     DWORD ladderProbeAt_ = 0;     // the last auto-ladder try
     DWORD stuckSince_ = 0, stuckLogAt_ = 0; // held still while pushing forward (logged for diagnosis)
+    DWORD pinnedSince_ = 0, pinnedLogAt_ = 0; // any push, the player not moving (in the air too; logged)
+    float pinnedAt_[3] = {};
     DWORD mantleAt_ = 0;                    // a mantle under way since then (logged for diagnosis)
     float mantleZ_ = 0.0f;
     DWORD ladderWindow_ = 0;      // how long GTA may keep the player for a ladder after the try
@@ -152,6 +156,7 @@ private:
     View view_{};
     float lens_ = 0.0f;
     bool thirdPerson_ = false, thirdPersonSet_ = false;
+    bool inputFrozen_ = false;
     bool hidden_ = false;
     Entity hiddenGun_ = 0;
     // The debug panel.

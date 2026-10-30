@@ -136,11 +136,17 @@ impl Rig {
     fn run(&mut self, buttons: u32) -> GunFrame {
         self.gunner.arm(&mut self.player, &self.arsenal);
         self.player.step(&MoveInput { msec: MS, buttons, forward: 127, ..Default::default() }, &self.world);
+        // As the runtime: a sprint over the aim takes the aim from the weapon too.
+        let buttons = if self.player.sprint_over_ads { buttons & !button::ADS } else { buttons };
         self.gunner.step(&mut self.player, &self.arsenal, MS, buttons)
     }
 
     fn frames(&mut self, buttons: u32, n: usize) -> Vec<GunFrame> {
         (0..n).map(|_| self.frame(buttons)).collect()
+    }
+
+    fn frames_run(&mut self, buttons: u32, n: usize) -> Vec<GunFrame> {
+        (0..n).map(|_| self.run(buttons)).collect()
     }
 }
 
@@ -216,6 +222,65 @@ fn sprinting_waits_for_the_reload_instead_of_cancelling_it() {
         rig.player.peek().sprinting
     });
     assert!(sprinted);
+}
+
+/// CODV's reload while sprinting: the sprint starts mid-reload, the reload goes on at its own time and
+/// the sprint is a little slower until it ends.
+#[test]
+fn reload_while_sprinting_keeps_the_reload_and_slows_the_sprint() {
+    let mut rig = Rig::new(&table(), &["auto_mp"]);
+    rig.gunner.reload_sprint = true;
+    rig.frames(button::ATTACK, 30); // 3 shots
+    assert!(rig.run(button::RELOAD).reload_started);
+    let (mut t, mut sprinted_mid, mut slow) = (0, false, 0.0f32);
+    loop {
+        let f = rig.run(button::SPRINT);
+        t += MS;
+        if f.clip == 10 {
+            break;
+        }
+        if rig.player.peek().sprinting {
+            sprinted_mid = true;
+            slow = rig.player.ps.velocity[0].hypot(rig.player.ps.velocity[1]);
+        }
+        assert!(t < 3000, "the sprint cancelled the reload");
+    }
+    assert!(sprinted_mid, "the sprint starts mid-reload");
+    assert!((1400..=1600).contains(&t), "the reload's own time: {t}");
+    // After the reload: still sprinting, at the full sprint speed.
+    rig.frames_run(button::SPRINT, 40);
+    assert!(rig.player.peek().sprinting);
+    let fast = rig.player.ps.velocity[0].hypot(rig.player.ps.velocity[1]);
+    assert!(slow < fast * 0.95 && slow > fast * 0.8, "slower while reloading: {slow} vs {fast}");
+}
+
+/// Reload pressed mid-sprint: the reload starts and the held sprint goes on.
+#[test]
+fn reload_pressed_mid_sprint_reloads_on_the_run() {
+    let mut rig = Rig::new(&table(), &["auto_mp"]);
+    rig.gunner.reload_sprint = true;
+    rig.frames(button::ATTACK, 30);
+    rig.frames_run(button::SPRINT, 40);
+    assert!(rig.player.peek().sprinting);
+    let started = (0..10).any(|_| rig.run(button::SPRINT | button::RELOAD).reload_started);
+    assert!(started, "the reload starts on the run");
+    let mut t = 0;
+    let mut sprinting = 0;
+    loop {
+        let f = rig.run(button::SPRINT);
+        t += MS;
+        if rig.player.peek().sprinting {
+            sprinting += 1;
+        }
+        if f.clip == 10 {
+            break;
+        }
+        assert!(t < 3000, "the reload never ended");
+    }
+    assert!(
+        sprinting * MS as i32 > t as i32 / 2,
+        "sprinting through most of the reload ({sprinting} frames of {t} ms)"
+    );
 }
 
 #[test]
@@ -456,4 +521,51 @@ fn a_knife_melee_ends_with_the_guns_quick_raise() {
     // A gun without the knife clip still goes straight back to idle (nothing else changes).
     let without = melee_anims(&t, "auto_mp");
     assert!(without.contains(&MELEE) && !without.contains(&QUICK_RAISE), "{without:?}");
+}
+
+/// A switch mid-reload cancels it (MW2): the other gun comes up at once, and a reload cut short before
+/// its add point puts no rounds in.
+#[test]
+fn a_switch_mid_reload_cancels_it_without_the_rounds() {
+    let mut rig = Rig::new(&table(), &["auto_mp", "semi_mp"]);
+    rig.frames(button::ATTACK, 30);
+    assert!(rig.frame(button::RELOAD).reload_started);
+    rig.frames(0, 30); // 0.3 s into a 1.5 s reload
+    rig.gunner.select(1);
+    let semi = rig.arsenal.id("semi_mp").unwrap();
+    let mut t = 0;
+    while rig.frame(0).weapon != semi {
+        t += MS;
+        assert!(t < 1000, "the switch waited for the reload");
+    }
+    let (ammo, _) = rig.gunner.ammo_state();
+    let auto = rig.arsenal.id("auto_mp").unwrap();
+    assert_eq!(ammo.iter().find(|a| a.0 == auto).unwrap().1, 7, "no rounds from the cut reload: {ammo:?}");
+}
+
+/// Sprint and aim, the last pressed wins while both are held.
+#[test]
+fn sprint_and_aim_the_last_pressed_wins() {
+    let mut rig = Rig::new(&table(), &["auto_mp"]);
+    let hold = |rig: &mut Rig, b: u32, n: usize| {
+        let mut f = rig.run(b);
+        for _ in 1..n {
+            f = rig.run(b);
+        }
+        (rig.player.peek().sprinting, f.ads)
+    };
+    // Sprinting, the aim pressed: aiming (not a walk with neither).
+    hold(&mut rig, button::SPRINT, 60);
+    let (s, a) = hold(&mut rig, button::SPRINT | button::ADS, 80);
+    assert!(!s && a > 0.9, "aiming over the held sprint: sprint {s} ads {a}");
+    // The aim let go, the sprint still held: sprinting again.
+    let (s, _) = hold(&mut rig, button::SPRINT, 40);
+    assert!(s, "the held sprint is back");
+    // Aiming, the sprint pressed: sprinting; the sprint let go: aiming again.
+    hold(&mut rig, 0, 40);
+    hold(&mut rig, button::ADS, 60);
+    let (s, a) = hold(&mut rig, button::ADS | button::SPRINT, 60);
+    assert!(s && a < 0.1, "sprinting over the held aim: sprint {s} ads {a}");
+    let (s, a) = hold(&mut rig, button::ADS, 80);
+    assert!(!s && a > 0.9, "aiming again: sprint {s} ads {a}");
 }

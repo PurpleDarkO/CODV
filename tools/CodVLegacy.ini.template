@@ -54,6 +54,13 @@ AmmoCounter=1
 DamageFlash=1
 ; InMissions: stay active while a story mission runs.
 InMissions=1
+; PoliceJuggernauts: in Free Roam, at four stars a Juggernaut may join the police (one at a time), at five up
+; to two: heavy armour, a heavy machine gun, slow, much more health and no head shot kill (0: never).
+PoliceJuggernauts=1
+; JuggernautCinematics: his entrance plays in three quick cuts and his death in slow motion around him; you
+; are frozen and cannot be hurt meanwhile (0: no cinematics). The menu's "Test: spawn a Juggernaut" puts one
+; ahead of you (Free Roam, CODV on), cinematics included.
+JuggernautCinematics=1
 ; Debug: runtime status at the top left, and the MW2 collision's ground under the
 ; player next to GTA's (they should agree). VerboseLog: state changes in CodVRuntime.log.
 Debug=0
@@ -147,6 +154,9 @@ Mw2Blood=1
 KillFeedback=1
 ; JumpSlowdown: MW2's slowdown when landing a jump (0: a landing keeps the speed).
 JumpSlowdown=0
+; ReloadSprint: sprint while reloading (1, the default): the reload goes on at a slightly slower sprint and
+; the gun comes up for the sprint once it ends. 0: the sprint waits for the reload (CODV 0.1.0).
+ReloadSprint=1
 ; Parkour: AutoVault (sprinting into a ledge up to 1.5 m vaults it, no jump key, keeping the speed), MantleSpeed (MW2: 1.0),
 ; HighClimb (jump at a 1.5 to 2.4 m ledge climbs it), Dive (hold crouch through a slide: dive to prone).
 AutoVault=1
@@ -176,6 +186,9 @@ Killstreak2=4
 Killstreak3=7
 EmpKills=15
 KeepKillstreaksOnDeath=0
+; NukeKillsPlayer: the Tactical Nuke kills you too, with your vehicle (MW2's rule); 0, the default: CODV
+; spares you.
+NukeKillsPlayer=0
 ; ThirdPerson: start in MW2's third-person camera. ThirdPersonKey: C / Back toggle it, and V changes the
 ; view in a vehicle (0, the default: first person always). ThirdPersonRange: metres behind.
 ThirdPerson=0

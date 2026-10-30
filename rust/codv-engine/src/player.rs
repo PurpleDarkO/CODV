@@ -97,6 +97,9 @@ pub struct WeaponMoveFacts {
     /// cancel a reload (weapon_iw4 drops the reload for the sprint-in); CODV
     /// keeps the reload and sprints after it, the sprint button still held.
     pub hold_sprint: bool,
+    /// The weapon is reloading and may sprint meanwhile (CODV's reload while sprinting): a held
+    /// sprint button sprints at once, the reload goes on (Gunner::reload_sprint).
+    pub reload_sprint: bool,
 }
 
 impl Default for WeaponMoveFacts {
@@ -119,6 +122,7 @@ impl Default for WeaponMoveFacts {
             melee_delay_ms: 0,
             melee_charge_delay_ms: 0,
             hold_sprint: false,
+            reload_sprint: false,
         }
     }
 }
@@ -142,6 +146,9 @@ pub struct AnimStep {
     pub msec: i32,
 }
 
+/// Sprint over aim: how long after the sprint press an aim held through it waits for the sprint.
+const SPRINT_OVER_ADS_GRACE_MS: i32 = 250;
+
 pub struct Mw2Player {
     pub ps: PlayerState,
     pub weapon: WeaponMoveFacts,
@@ -149,6 +156,15 @@ pub struct Mw2Player {
     pub anim: AnimStep,
     cmd_angles: [f32; 3],
     old_buttons: u32,
+    /// CODV's sprint and aim, the last pressed wins while both are held (MW2 walked with neither):
+    /// a sprint pressed while aiming sprints, and the aim is back when the sprint ends (the aim still
+    /// held); an aim pressed while the sprint is held aims, and the sprint is back when the aim is let go.
+    /// The weapon tick takes the aim's half too.
+    pub sprint_over_ads: bool,
+    sprint_over_ads_at: i32,
+    ads_over_sprint: bool,
+    /// The input's buttons last step (the press edges).
+    raw_old_buttons: u32,
     time: i32,
     /// How many times the player was freed from overlapping the world (debug line).
     pub unstuck: u32,
@@ -410,6 +426,10 @@ impl Mw2Player {
             anim: AnimStep::default(),
             cmd_angles: [0.0; 3],
             old_buttons: 0,
+            sprint_over_ads: false,
+            sprint_over_ads_at: 0,
+            ads_over_sprint: false,
+            raw_old_buttons: 0,
             time: SPAWN_TIME,
             unstuck: 0,
             last_free: None,
@@ -581,10 +601,50 @@ impl Mw2Player {
             rightmove: input.right,
             ..UserCmd::default()
         };
+        // Sprint and aim: the last pressed wins while both are held.
+        let (ads, sprint) = (input.buttons & button::ADS != 0, input.buttons & button::SPRINT != 0);
+        let sprint_press = sprint && self.raw_old_buttons & button::SPRINT == 0;
+        let ads_press = ads && self.raw_old_buttons & button::ADS == 0;
+        let sprint_release = !sprint && self.raw_old_buttons & button::SPRINT != 0;
+        self.raw_old_buttons = input.buttons;
+        if !ads {
+            self.sprint_over_ads = false;
+            self.ads_over_sprint = false;
+        } else if sprint_press && input.forward > 0 {
+            self.sprint_over_ads = true;
+            self.ads_over_sprint = false;
+            self.sprint_over_ads_at = self.time;
+        } else if ads_press {
+            // Aim pressed: it ends the sprint (MW2); a held sprint (CODV's) waits for the aim to go.
+            self.sprint_over_ads = false;
+            self.ads_over_sprint = sprint && self.hold_to_sprint;
+        }
+        if !sprint {
+            self.ads_over_sprint = false;
+        }
+        // The held sprint let go over a held aim: the sprint ends and the aim is back (CODV's held sprint;
+        // MW2's pressed sprint runs on until the aim is pressed again).
+        if self.sprint_over_ads && sprint_release && self.hold_to_sprint {
+            movement_iw4::end_sprint(&mut self.ps, &cmd);
+            self.sprint_over_ads = false;
+        }
+        if self.sprint_over_ads {
+            cmd.buttons &= !button::ADS;
+        }
+        if self.ads_over_sprint {
+            movement_iw4::end_sprint(&mut self.ps, &cmd);
+            cmd.buttons &= !button::SPRINT;
+            // Let go of the aim with the sprint held: sprinting again at once.
+            self.ps.sprint_button_up_required = 0;
+        }
         if self.weapon.hold_sprint {
             cmd.buttons &= !button::SPRINT;
             movement_iw4::end_sprint(&mut self.ps, &cmd);
             // Held through the reload: sprint again as soon as it ends.
+            self.ps.sprint_button_up_required = 0;
+        }
+        if self.weapon.reload_sprint {
+            // The reload press ends a sprint (MW2): the held button sprints again straight away.
             self.ps.sprint_button_up_required = 0;
         }
         if self.hold_to_sprint && cmd.buttons & button::SPRINT != 0 {
@@ -634,6 +694,13 @@ impl Mw2Player {
         let context = self.context();
         let result = movement_iw4::pmove(&mut self.ps, &mut cmd, context, &Backend(world), &lengths, &ClimbRootDelta);
         self.old_buttons = sent_buttons;
+        // No sprint came of it (or it is over): aiming again, a moment after the press.
+        if self.sprint_over_ads
+            && self.ps.pm_flags & pm_flags::SPRINTING == 0
+            && self.time.wrapping_sub(self.sprint_over_ads_at) > SPRINT_OVER_ADS_GRACE_MS
+        {
+            self.sprint_over_ads = false;
+        }
         self.collect_events();
         let mantling = self.ps.pm_flags & pm_flags::MANTLE != 0;
         if mantling && !self.was_mantling {

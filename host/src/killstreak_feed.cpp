@@ -30,6 +30,7 @@ struct State {
     ksunits::Units units;
     std::uint32_t giveBack = 0; // a reward to return (the airstrike's target map cancelled)
     std::uint32_t testGive = 0; // the menu's test grant, handed over next frame
+    bool nukeWas = false;       // a nuke was inbound at the last step (its end starts the streak over)
 } g;
 
 std::uint32_t Now() {
@@ -46,6 +47,7 @@ bool HostileToPlayer(Ped ped, Ped player) {
     f.inCombatWithPlayer = Call<BOOL>(gta::IS_PED_IN_COMBAT, ped, player) != FALSE;
     f.relationship = Call<int>(gta::GET_RELATIONSHIP_BETWEEN_PEDS, ped, player);
     f.damagedPlayer = Call<BOOL>(gta::HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY, player, ped, TRUE) != FALSE;
+    f.scriptedEnemy = Call<Hash>(gta::GET_PED_RELATIONSHIP_GROUP_HASH, ped) == ksrules::kScriptedEnemyGroup;
     return ksrules::IsHostile(f);
 }
 
@@ -200,6 +202,7 @@ void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log) {
             if (cancelled) give = CV_KS_AIRSTRIKE;
             else g.units.Airstrike(runtime, at, heading, log);
         }
+        g.units.SetNukeKillsPlayer(f.nukeKillsPlayer);
         g.units.Tick(runtime, player, view, give);
         if (!give && g.testGive) give = g.testGive, g.testGive = 0;
     }
@@ -213,8 +216,13 @@ void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log) {
     if (f.enabled && f.allowed) in.flags |= CV_STREAK_ALLOWED;
     if (died) in.flags |= CV_STREAK_DIED;
     if (f.modeOff) in.flags |= CV_STREAK_RESET;
+    // The nuke over (its blast's kills reported up to this call): the streak starts again.
+    const bool nuke = g.units.NukeInbound();
+    if (g.nukeWas && !nuke) in.flags |= CV_STREAK_NUKE_OVER;
+    g.nukeWas = nuke;
     const bool key = Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, ksrules::kActionSlotKey) != FALSE;
-    if (f.enabled && f.allowed && !f.menuOpen && (key || (dpadPressed && g.held > 0)) && !Busy(g.top))
+    // Nothing else is called in under a nuke: what is held then is cleared when it is over.
+    if (f.enabled && f.allowed && !f.menuOpen && !nuke && (key || (dpadPressed && g.held > 0)) && !Busy(g.top))
         in.flags |= CV_STREAK_ACTIVATE;
     CvStreakOutput out{};
     if (runtime.KillstreakStep(in, out)) {

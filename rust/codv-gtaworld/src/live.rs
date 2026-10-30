@@ -621,7 +621,7 @@ impl Level {
             }
         })?;
         let (_, inst) = best.ok_or("no instance at the entity's position")?;
-        instance_model(inst)
+        Ok(instance_model(inst)?)
     }
 
     /// Triangles of the static map within `half` of `centre` (GTA space),
@@ -657,13 +657,40 @@ impl Level {
     }
 }
 
+/// Why an instance gave no collision.
+#[derive(Clone, Debug, PartialEq)]
+pub enum InstanceError {
+    /// Its bound could not be read (a freed instance, an unknown bound type).
+    Unreadable(String),
+    /// Read fine, but nothing in it collides with a ped: GTA lets people walk
+    /// through it (a dropped weapon, debris, decorations).
+    NoPedCollision { parts: usize, filtered: usize },
+}
+
+impl std::fmt::Display for InstanceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InstanceError::Unreadable(e) => f.write_str(e),
+            InstanceError::NoPedCollision { parts, filtered } => {
+                write!(f, "no skater collision in its bound ({parts} parts, {filtered} filtered)")
+            }
+        }
+    }
+}
+
+impl From<InstanceError> for String {
+    fn from(e: InstanceError) -> String {
+        e.to_string()
+    }
+}
+
 /// The collision of one live instance (`phInst*`, e.g. an entity's fragInst
 /// as the host reads it) in its own model space, by the static map's flag
 /// rule (what a ped collides with). CODV: split out of SK8V's `model_at` so
 /// the host can name the instance and no table walk is needed.
-pub fn instance_model(inst: usize) -> Result<Vec<Tri>, String> {
+pub fn instance_model(inst: usize) -> Result<Vec<Tri>, InstanceError> {
     if !heap(inst as u64) {
-        return Err("no instance".into());
+        return Err(InstanceError::Unreadable("no instance".into()));
     }
     let mut ih = [0u8; 0x18];
     let mut bound = [0u8; 8];
@@ -674,7 +701,7 @@ pub fn instance_model(inst: usize) -> Result<Vec<Tri>, String> {
         || !heap(u64::from_le_bytes(bound))
         || !read_mem(u64::from_le_bytes(bound) as usize, &mut bh)
     {
-        return Err("instance bound unreadable".into());
+        return Err(InstanceError::Unreadable("instance bound unreadable".into()));
     }
     let bound = u64::from_le_bytes(bound) as usize;
     let rows = [Vec3::X, Vec3::Y, Vec3::Z, Vec3::ZERO];
@@ -686,7 +713,7 @@ pub fn instance_model(inst: usize) -> Result<Vec<Tri>, String> {
         kind @ (BOUND_BVH | 4 | 0 | 1 | 3 | 12 | 13) => {
             found.push(Bvh { inst, bound, kind, rows, identity: true, spare: false, at: [0.0, 0.0], reach: 0.0 })
         }
-        kind => return Err(format!("bound type {kind}")),
+        kind => return Err(InstanceError::Unreadable(format!("bound type {kind}"))),
     }
     let mut tris = Vec::new();
     for b in found.iter().filter(|b| !b.spare) {
@@ -696,11 +723,7 @@ pub fn instance_model(inst: usize) -> Result<Vec<Tri>, String> {
         }
     }
     if tris.is_empty() {
-        return Err(format!(
-            "no skater collision in its bound ({} parts, {} filtered)",
-            found.len(),
-            census.children_filtered
-        ));
+        return Err(InstanceError::NoPedCollision { parts: found.len(), filtered: census.children_filtered });
     }
     Ok(tris)
 }

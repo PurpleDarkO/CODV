@@ -14,8 +14,10 @@
 
 namespace ksrules {
 
-// GTA ped types (GET_PED_TYPE) that are the law or the army.
-inline constexpr int kPedCop = 6, kPedSwat = 27, kPedArmy = 29;
+// GTA ped types (GET_PED_TYPE) that are the law or the army, and animals.
+inline constexpr int kPedCop = 6, kPedSwat = 27, kPedArmy = 29, kPedAnimal = 28;
+// CODV's own enemy relationship group (experimental modes, outside the public build), by its hash.
+inline constexpr std::uint32_t kScriptedEnemyGroup = 0x812156B5u;
 // GET_RELATIONSHIP_BETWEEN_PEDS: 5 = hate.
 inline constexpr int kRelationshipHate = 5;
 
@@ -24,9 +26,14 @@ struct PedFacts {
     bool inCombatWithPlayer = false;
     int relationship = 255; // towards the player
     bool damagedPlayer = false;
+    bool scriptedEnemy = false; // in CODV's own enemy group
 };
 
+// Animals never count (a mountain lion or a dog going for the player is no enemy kill), unless one of
+// one of CODV's own scripted enemies.
 inline bool IsHostile(const PedFacts& f) {
+    if (f.scriptedEnemy) return true;
+    if (f.pedType == kPedAnimal) return false;
     return f.pedType == kPedCop || f.pedType == kPedSwat || f.pedType == kPedArmy || f.inCombatWithPlayer ||
            f.relationship == kRelationshipHate || f.damagedPlayer;
 }

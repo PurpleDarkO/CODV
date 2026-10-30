@@ -6,6 +6,69 @@ noted with each release: a host and a runtime only work together on the same ABI
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-30
+
+Runtime ABI 10, unchanged (the runtime's additions are an optional export and optional flags).
+
+### Added
+- Reload while sprinting (menu Movement, `ReloadSprint`, on by default): a sprint no longer waits for the
+  reload; the reload goes on at a slightly slower sprint, and the gun comes up for the sprint once it ends.
+  A reload pressed mid-sprint reloads on the run. Off: the sprint waits for the reload, as in 0.1.0.
+  Runtime option 46 (`CV_OPT_RELOAD_SPRINT`); ABI 10 unchanged.
+- Sprint and aim, the last pressed wins while both are held (MW2 walked with neither): sprinting, an aim
+  press aims, and the held sprint is back when the aim is let go; aiming, a sprint press sprints, and the
+  held aim is back when the sprint is let go (or ends).
+- The Tactical Nuke can kill the player too, with their vehicle (menu Killstreaks, `NukeKillsPlayer`;
+  MW2's rule). Off by default: CODV spares the player, as in 0.1.0.
+- The Tactical Nuke starts the streak over (MW2 ends the match on it): its blast's kills count, then, once
+  it is over, the count goes back to zero and the rewards still held are cleared. Nothing else can be called
+  in while it is inbound. Runtime: `CV_STREAK_NUKE_OVER` (an optional flag); ABI 10 unchanged.
+- Rounds: each run a Tactical Nuke ends is a round. The score bar shows "Round N" in small under the kill count, one
+  more after every nuke. Switching the mode off starts again at Round 1.
+- Police Juggernauts (Free Roam; menu Game, `PoliceJuggernauts`, on by default): at four stars a Juggernaut
+  may join the police (one at a time), at five up to three at once; every one still alive counts, one
+  left far behind too, so a long chase never piles them up. After one dies the next waits 45 s, 1:15 or 1:45 at least (at random),
+  and none comes while the stars flash (the police searching). Heavy armour and a heavy machine gun in bursts (a loose aim), slow, 1500
+  health, no ragdoll and no head shot kill; a bigger orange dot on the radar. His entrance plays in three
+  cuts (4 s, with a pose picked at random: a knuckle crunch, a slow clap, a taunt, a salute, a flex, a
+  bouncer's stance) and his death in
+  slow motion around him, with a letterbox; the player is frozen and
+  cannot be hurt meanwhile (`JuggernautCinematics`, on by default). The menu's "Test: spawn a Juggernaut"
+  puts one ahead of the player, cinematics included.
+- A new look for the CODV menu: the CODV mark on black with the green rule, a bar with where you are and
+  the position in the list, short setting names with the value on the right (ON in green, the selected row
+  in green with < > around its value), each section's size, a scroll bar, a line of help for the selected
+  setting, and the controls for the keyboard or the pad. Tests are actions now ("Test: spawn a
+  Juggernaut" no longer shows On / Off).
+- The Juggernaut now and then (30%) skips the pose and just comes on, gun up.
+- The Juggernaut's entrance plays without words; his death shows "JUGGERNAUT DOWN" in MW2's own killstreak
+  splash, with its fonts and glow (GTA's text only with MW2's HUD off). Runtime: `cv_mw2_splash` (an
+  optional export) and `CV_HUD_CINEMATIC`; ABI 10 unchanged.
+- A rare Juggernaut (1%) carries a minigun instead, sprayed even looser; the menu
+  has a test for him too.
+
+### Fixed
+- Opening the CODV menu no longer hands the player back to GTA: CODV stays on (view, gun, HUD) and the
+  player stands still while the keys drive the menu.
+- Kills while a camera has the view count again: the Juggernaut dying in his cinematic, and anything killed
+  from a killstreak's view (Predator, AC-130, Chopper Gunner). A view longer than 2 s made the next scan skip
+  the deaths in it. Who counts is unchanged: hostile people only, never civilians or animals.
+- Invisible obstacles: a loose object GTA lets people walk through (a dropped weapon, debris after an
+  explosion) was a solid box under MW2 movement; it is passable now, as in GTA. Vehicles always keep their
+  collision, and an object whose collision cannot be read keeps its box.
+- Invisible walls where a breakable prop stood: a fence blown apart by a frag or a rocket still blocked the
+  player (and was mantled) where it had been; a broken prop is passable now, its pieces on the ground
+  as before.
+- Animals no longer count as hostile kills (a mountain lion or a dog going for the player added to the
+  streak and showed on the UAV).
+- A weapon switch mid-reload waits no more: the reload is cancelled and the other gun comes up at once
+  (MW2's rule; a reload cut short before its add point puts no rounds in). GTA's own reload task is no
+  longer started on the character under MW2.
+
+### Known issues
+- Now and then a rifle-armed NPC (SWAT, soldiers) fires a burst at a minigun's rate. This is a GTA V bug in
+  two of its NPC rifle fire animations, not CODV's.
+
 ## [0.1.0] - 2026-10-26
 
 First public release. Runtime ABI 10.
@@ -68,5 +131,6 @@ First public release. Runtime ABI 10.
 - CODV's own missiles have no in-flight sound yet.
 - GTA V Enhanced and GTA Online are not supported.
 
-[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/PurpleDarkO/CODV/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/PurpleDarkO/CODV/releases/tag/v0.1.0

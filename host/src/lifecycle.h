@@ -11,7 +11,8 @@ struct Settings {
 };
 
 // Why CODV must not drive the player right now (nullptr: allowed).
-const char* Blocked(Ped ped, const Settings& s, bool menuOpen);
+// (The CODV menu is not a reason: MW2 keeps the player and the view, its input frozen meanwhile.)
+const char* Blocked(Ped ped, const Settings& s);
 
 // Logs changes of the blocking reason once (not every frame).
 class ReasonLog {

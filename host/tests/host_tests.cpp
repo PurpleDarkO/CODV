@@ -15,6 +15,7 @@
 #include "killstreak_rules.h"
 #include "menu.h"
 #include "surface_map.h"
+#include "juggernaut_rules.h"
 #include "mw2_input.h"
 #include "pad.h"
 
@@ -103,6 +104,14 @@ static void KillstreakRules() {
     CHECK(!ksrules::IsHostile(gang));
     gang.inCombatWithPlayer = true;
     CHECK(ksrules::IsHostile(gang));
+    ksrules::PedFacts cougar;
+    cougar.pedType = ksrules::kPedAnimal;
+    cougar.inCombatWithPlayer = true;
+    cougar.relationship = ksrules::kRelationshipHate;
+    cougar.damagedPlayer = true;
+    CHECK(!ksrules::IsHostile(cougar)); // animals never count
+    cougar.scriptedEnemy = true;
+    CHECK(ksrules::IsHostile(cougar)); // CODV's own scripted enemies do
     CHECK(Near(ksrules::EmpFlash(0), 1.0f) && Near(ksrules::EmpFlash(1600), 0.5f) && ksrules::EmpFlash(3200) == 0.0f);
     ksrules::Timer t;
     t.Start(1000, ksrules::kUavMs);
@@ -210,6 +219,18 @@ static void MenuModel() {
     CHECK(hm && hm->key == "Hitmarker" && hm->value == 0.0f);
     CHECK(p.Back() && p.page == -1 && p.cursor == 2 && !p.Back());
     CHECK(p.items[1].Text() == "Weapons  >" && !p.items[1].Step(1));
+    CHECK(p.SectionSize(1) == 1 && p.SectionSize(3) == 2);
+    CHECK(p.items[4].Value() == "On" && p.items[2].Value() == "1.00x" && p.items[1].Value().empty());
+
+    // Actions: pressed (+1) they run and change nothing; -1 does nothing.
+    menu::Model a;
+    int pressed = 0;
+    a.items.push_back(menu::Action("Test", [&](float) { ++pressed; }));
+    CHECK(a.Change(-1) == nullptr);
+    menu::Item* act = a.Change(1);
+    CHECK(act && act->key.empty() && act->Value().empty());
+    if (act && act->apply) act->apply(act->value);
+    CHECK(pressed == 1 && a.items[0].value == 0.0f);
 }
 
 static void SurfaceMap() {
@@ -479,6 +500,29 @@ static void Mw2HudLayout() {
     CHECK(q.size() >= 4 && q[1].u[0] == 1 && q[2].v[0] == 1 && q[3].u[0] == 1 && q[3].v[0] == 1);
 }
 
+
+#ifdef CODV_EXPERIMENTAL
+// experimental/ (local only, never published): its own rules' checks.
+#include "experimental_tests.h"
+#endif
+
+static void JuggernautRules() {
+    using namespace jugg;
+    CHECK(MaxAlive(3) == 0 && MaxAlive(4) == 1 && MaxAlive(5) == 3 && MaxAlive(5) == kMaxJuggernauts);
+    CHECK(AfterDeathMs(0.0f) == 45000 && AfterDeathMs(0.5f) == 75000 && AfterDeathMs(0.99f) == 105000);
+    CHECK(Chance(3) == 0.0f && Chance(4) > 0.0f && Chance(5) > Chance(4) && Chance(5) < 1.0f);
+    CHECK(kHealth > 1000 && kArmour > 0 && kMoveRate < 1.0f);
+    CHECK(kAccuracy > 0 && kAccuracy < 20 && kShootRate > 0 && kShootRate < 100); // a threat, not a marksman
+    CHECK(kMinigunChance > 0.0f && kMinigunChance <= 0.05f && kMinigunAccuracy < kAccuracy); // rare, and looser
+    CHECK(IntroShot(0) == 0 && IntroShot(kShotMs) == 1 && IntroShot(kIntroMs - 1) == 2 && IntroShot(99999) == 2);
+    float pitch = 0, heading = 0;
+    const float o[3] = {0, 0, 0}, north[3] = {0, 10, 0}, west[3] = {-10, 0, 10};
+    LookAt(o, north, pitch, heading);
+    CHECK(Near(heading, 0.0f) && Near(pitch, 0.0f));
+    LookAt(o, west, pitch, heading); // GTA headings grow to the left: west is 90
+    CHECK(Near(heading, 90.0f, 0.01f) && Near(pitch, 45.0f, 0.01f));
+}
+
 int main() {
     InputMap();
     ControlPolicy();
@@ -492,6 +536,10 @@ int main() {
     DdsFiles();
     Mw2HudLayout();
     GtaAudioDsp();
+#ifdef CODV_EXPERIMENTAL
+    ExperimentalTests();
+#endif
+    JuggernautRules();
     if (g_failures) {
         std::fprintf(stderr, "%d check(s) failed\n", g_failures);
         return EXIT_FAILURE;

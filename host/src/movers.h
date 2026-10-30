@@ -17,14 +17,14 @@
 namespace movers {
 
 struct Stats {
-    std::uint32_t pooled = 0, vehicles = 0, peds = 0, objects = 0, doors = 0, skipped = 0;
+    std::uint32_t pooled = 0, vehicles = 0, peds = 0, objects = 0, doors = 0, broken = 0, skipped = 0;
 };
 
 class Gatherer {
 public:
     // Entities within `radius` m of `center`, nearest first (at most 96),
     // leaving out the player, the vehicle it is in, peds in vehicles, dead or
-    // ragdolled peds, props held or attached, invisible entities and doors.
+    // ragdolled peds, props held, attached or broken, invisible entities and doors.
     const std::vector<CvMover>& Gather(Ped self, const Vector3& center, float radius);
     const Stats& LastStats() const { return stats_; }
 

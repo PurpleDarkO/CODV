@@ -206,7 +206,10 @@ fn body(m: &CvMover, collision: &Streamer, old: Option<Body>) -> Option<Body> {
             let request = TemplateRequest { model: m.model, instance: m.instance as usize, lo, hi };
             match collision.template(request) {
                 collision::Template::Ready(t) => (Shape::Exact, [m.right, m.forward, m.up], Some(t)),
-                collision::Template::Pending | collision::Template::Box => {
+                // Nothing in GTA's bound stops a ped: an object is walked through as in GTA (a
+                // vehicle always keeps a body: its box).
+                collision::Template::Passable if m.kind != CV_MOVER_VEHICLE => return None,
+                collision::Template::Pending | collision::Template::Box | collision::Template::Passable => {
                     (Shape::Box, [m.right, m.forward, m.up], None)
                 }
             }
@@ -311,6 +314,33 @@ impl World for MoverView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An object GTA lets people walk through (nothing in its bound collides with a ped) gets no
+    /// body; a vehicle never goes passable (its box), and an unreadable object keeps its box.
+    #[test]
+    fn passable_objects_have_no_body_and_vehicles_keep_theirs() {
+        let streamer = Streamer::new(Arc::new(Box::new(|_: &str| {}) as crate::Log));
+        let mover = |kind: u32, model: u32| CvMover {
+            entity: 1,
+            model,
+            kind,
+            flags: 0,
+            instance: 0x1000,
+            position: [0.0, 0.0, 0.0],
+            right: [1.0, 0.0, 0.0],
+            forward: [0.0, 1.0, 0.0],
+            up: [0.0, 0.0, 1.0],
+            box_min: [-0.5, -0.5, 0.0],
+            box_max: [0.5, 0.5, 1.0],
+        };
+        streamer.set_template(1, collision::Template::Passable);
+        streamer.set_template(2, collision::Template::Box);
+        assert!(body(&mover(CV_MOVER_OBJECT, 1), &streamer, None).is_none(), "a dropped gun: walked through");
+        let car = body(&mover(CV_MOVER_VEHICLE, 1), &streamer, None).expect("a vehicle keeps a body");
+        assert_eq!(car.shape, Shape::Box);
+        let unreadable = body(&mover(CV_MOVER_OBJECT, 2), &streamer, None).expect("unreadable: its box");
+        assert_eq!(unreadable.shape, Shape::Box);
+    }
 
     #[test]
     fn a_car_at_rest_keeps_its_pose_through_physics_jitter() {

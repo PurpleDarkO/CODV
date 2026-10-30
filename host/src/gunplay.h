@@ -70,6 +70,13 @@ public:
     std::string Status() const { return status_; }
     // F5c: the hostile peds the player killed since the last call (police, military, anyone
     // fighting the player: killstreak_rules.h); civilians are not counted.
+    // The deaths alone, for frames that skip Apply (a killstreak's camera, a cinematic has the view): a
+    // kill then still counts (a pause longer than 2 s since the last scan forgot the ones in it).
+    void Scan(Ped player, DWORD now, bool streakAttacking) {
+        Settings s;
+        s.streakAttacking = streakAttacking;
+        ScanDeaths(player, now, s);
+    }
     std::uint32_t TakeHostileKills() {
         const std::uint32_t n = hostileKills_;
         hostileKills_ = 0;

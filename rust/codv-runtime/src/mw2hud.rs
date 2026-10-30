@@ -76,7 +76,20 @@ pub struct View {
     /// GTA has the player in a vehicle: no weapon bar, sprint meter or compass (the gun is away and
     /// GTA's radar shows the way); the kill counter, killstreaks and notices stay.
     pub vehicle: bool,
+    /// A cinematic has the view (the host's camera): the splashes only.
+    pub cinematic: bool,
 }
+
+/// A splash waiting or showing: a killstreak earned (its name and the streak) or the host's own
+/// (a title, a line under it and the title's glow), drawn in the same MW2 splash.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Splash {
+    Killstreak { name: String, streak: i32 },
+    Custom { title: String, description: String, glow: [f32; 4] },
+}
+
+/// How long the host's own splash shows (MW2's killstreak splash: 2.5 s).
+const CUSTOM_SPLASH_MS: i32 = 3000;
 
 #[derive(Clone, Copy, Default)]
 struct Hit {
@@ -130,8 +143,8 @@ pub struct Mw2Hud {
     rng: u32,
     select: (u32, i32),
     /// F5c: killstreak splashes waiting (reference, streak) and the one showing (with its start).
-    splash_queue: std::collections::VecDeque<(String, i32)>,
-    splash: Option<(String, i32, i32)>,
+    splash_queue: std::collections::VecDeque<Splash>,
+    splash: Option<(Splash, i32)>,
     /// The held reward (its reference) and the key label that uses it ("4").
     pub held: Option<String>,
     pub key_label: String,
@@ -228,8 +241,22 @@ impl Mw2Hud {
     /// `name` earned at `streak` kills: its splash (_hud_message.gsc killstreakSplashNotify), queued.
     pub fn killstreak_earned(&mut self, name: &str, streak: i32) {
         if self.data.killstreak(name).is_some() {
-            self.splash_queue.push_back((name.to_owned(), streak));
+            self.splash_queue.push_back(Splash::Killstreak { name: name.to_owned(), streak });
         }
+    }
+
+    /// The host's own splash (a Juggernaut's entrance): MW2's killstreak splash with `title` (in
+    /// `glow`) and `description`, queued after any killstreak's. False without the import's splash.
+    pub fn custom_splash(&mut self, title: &str, description: &str, glow: [f32; 4]) -> bool {
+        if self.data.splash_items.is_empty() {
+            return false;
+        }
+        self.splash_queue.push_back(Splash::Custom {
+            title: title.to_owned(),
+            description: description.to_owned(),
+            glow,
+        });
+        true
     }
 
     pub fn image_name(&self, index: u32) -> Option<&str> {
@@ -304,6 +331,12 @@ impl Mw2Hud {
         }
         let sp = h::ScreenPlacement::setup_fullscreen(view.width, view.height, 1.0);
         let ps = &player.ps;
+        // A host cinematic has the view: only the splashes (a Juggernaut's title) over it.
+        if view.cinematic {
+            self.killstreak_splash(&mut out, &sp);
+            self.kill_splash(&mut out, &sp);
+            return out;
+        }
         // F5c: a killstreak that takes the view (Predator, AC-130, Chopper Gunner, the airstrike's
         // map) shows its own overlay instead of the weapon bar and the crosshair-area cues.
         if self.streak_view.kind != streaks::ViewKind::None {
@@ -356,27 +389,36 @@ impl Mw2Hud {
     /// splashTable glow, earn hint, icon), offset by the open / close slide.
     fn killstreak_splash(&mut self, out: &mut Vec<Quad>, sp: &h::ScreenPlacement) {
         if self.splash.is_none() {
-            let Some((name, streak)) = self.splash_queue.pop_front() else { return };
-            self.splash = Some((name, streak, self.time_ms));
+            let Some(next) = self.splash_queue.pop_front() else { return };
+            self.splash = Some((next, self.time_ms));
         }
-        let Some((name, streak, start)) = self.splash.clone() else { return };
-        let Some(k) = self.data.killstreak(&name).cloned() else {
-            self.splash = None;
-            return;
+        let Some((splash, start)) = self.splash.clone() else { return };
+        // What it shows: the title (and its glow), the line under it, the icon.
+        let (title, hint, glow, icon, hold) = match &splash {
+            Splash::Killstreak { name, streak } => {
+                let Some(k) = self.data.killstreak(name).cloned() else {
+                    self.splash = None;
+                    return;
+                };
+                // A care package's reward (streak 0): its name as the title (splashTable "<name>_pickup").
+                let title = if *streak <= 0 {
+                    self.data.string(&k.title).map(str::to_owned)
+                } else {
+                    self.data.string(&k.splash_title).map(|t| h::splash_replace_optional(t, *streak))
+                };
+                let hint = self.data.string(&k.earned).map(|t| t.replace("{+actionslot 4}", &self.key_label));
+                (title, hint, k.glow, self.data.image(&k.icon).map(str::to_owned), k.splash_ms)
+            }
+            Splash::Custom { title, description, glow } => {
+                (Some(title.clone()), Some(description.clone()), *glow, None, CUSTOM_SPLASH_MS)
+            }
         };
         let age = self.time_ms.wrapping_sub(start);
-        let hold = k.splash_ms.max(SPLASH_LERP_MS);
+        let hold = hold.max(SPLASH_LERP_MS);
         let Some((dx, alpha)) = splash_motion(age, hold) else {
             self.splash = None;
             return;
         };
-        // A care package's reward (streak 0): its name as the title (splashTable "<name>_pickup").
-        let title = if streak <= 0 {
-            self.data.string(&k.title).map(str::to_owned)
-        } else {
-            self.data.string(&k.splash_title).map(|t| h::splash_replace_optional(t, streak))
-        };
-        let hint = self.data.string(&k.earned).map(|t| t.replace("{+actionslot 4}", &self.key_label));
         let items = self.data.splash_items.clone();
         for item in &items {
             let mut item = item.clone();
@@ -386,7 +428,7 @@ impl Mw2Hud {
             match item.name.as_str() {
                 "killstreak_title" => {
                     if let Some(t) = &title {
-                        let mut glow = k.glow;
+                        let mut glow = glow;
                         glow[3] *= alpha;
                         self.item_text_glow(out, sp, &item, t, color, Some(glow));
                     }
@@ -397,7 +439,7 @@ impl Mw2Hud {
                     }
                 }
                 "killstreak_icon" => {
-                    if let Some(img) = self.data.image(&k.icon).map(str::to_owned).and_then(|i| self.image(&i)) {
+                    if let Some(img) = icon.as_ref().and_then(|i| self.image(i)) {
                         out.push(pic(sp, img, item.rect, item.align, color));
                     }
                 }
@@ -1348,6 +1390,20 @@ mod tests {
         assert_eq!(splash_motion(-5, 2500), Some((-640.0, 0.0)));
         assert_eq!(splash_motion(75, 2500), Some((-320.0, 0.5)));
         assert_eq!(splash_motion(2650, 2500), None);
+        // The host's own splash (a Juggernaut): the title in its glow, and in a cinematic the splash alone.
+        assert!(hud.custom_splash("JUGGERNAUT", "Enemy Juggernaut inbound", [1.0, 0.5, 0.1, 1.0]));
+        let _ = hud.draw(&player, &w, View { cinematic: true, ..view() }, &[]); // it starts showing
+        hud.advance(1000);
+        let q = hud.draw(&player, &w, View { cinematic: true, ..view() }, &[]);
+        assert!(q.iter().any(|x| x.color[0] == 1.0 && x.color[1] == 0.5), "the title in its glow");
+        assert_eq!(images(&hud, &q, "dpad_ks_uav"), 0, "a cinematic: the splash only");
+        let q = hud.draw(&player, &w, view(), &[]);
+        assert_eq!(images(&hud, &q, "dpad_ks_uav"), 1, "the HUD as usual outside it");
+        for _ in 0..4 {
+            hud.advance(1000); // (a step is at most 1 s)
+        }
+        let q = hud.draw(&player, &w, View { cinematic: true, ..view() }, &[]);
+        assert!(q.is_empty(), "gone after its 3 s");
     }
 }
 

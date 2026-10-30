@@ -78,6 +78,10 @@ def main():
     missing = [f for f in PACKAGE_FILES if not (REPO / 'build/package' / f).is_file()]
     if missing:
         raise SystemExit(f'build/package lacks {", ".join(missing)}: run BUILD.bat first')
+    # experimental/ (local only) is built into the ASI whenever the folder is there: never in a release.
+    if b'experimental build (not for release)' in (REPO / 'build/package/CodVLegacy.asi').read_bytes():
+        raise SystemExit('CodVLegacy.asi was built with experimental/: move that folder out of the checkout, '
+                         'rebuild (BUILD.bat) and run this again')
     copies = {}
     for f in PACKAGE_FILES:
         copies[f'build/package/{f}'] = REPO / 'build/package' / f

@@ -25,7 +25,11 @@
 #include "movers.h"
 #include "mw2_driver.h"
 #include "physics_level.h"
+#include "police_juggernaut.h"
 #include "runtime_bridge.h"
+#if CODV_EXPERIMENTAL
+#include "experimental.h" // experimental/: modes in the works (local only, never published)
+#endif
 #include "version_guard.h"
 #include "viewmodel_feed.h"
 
@@ -119,6 +123,9 @@ struct Config {
     // MW2's sprint length in seconds before the weapon's scale (MW2 = 4); twice MW2's by default.
     float sprintTime = 8.0f;
     float sprintRecharge = 1.3f; // the sprint meter refills this much faster than MW2's
+    // The game mode: 0 Free Roam, the public build's only one. Experimental builds add others, which have
+    // no killstreaks and no kill counter (Scavenger and the kill points stay).
+    int gameMode = 0;
     // F5c: killstreaks (hostile kills only), the three picks (kRewardChoices indices) and the EMP's kills.
     bool killstreaks = true;
     // MW2's Scavenger: hostile kills give a magazine more for every gun and a frag.
@@ -132,7 +139,12 @@ struct Config {
     bool spacedKillstreaks = true; // CODV's spaced kill counts (nuke 35); off: MW2's (nuke 25)
     bool allKillstreaks = true;   // every killstreak at its kill count (CODV); off: the three picks (MW2)
     bool keepKillstreaks = false; // unused killstreaks survive a death (MW2); off: a death loses them
+    bool nukeKillsPlayer = false; // the Tactical Nuke kills the player too (MW2); off: CODV spares the player
     bool jumpSlowdown = false; // MW2's (off: a landing keeps the speed)
+    bool reloadSprint = true;  // reload while sprinting (a little slower); off: the sprint waits for the reload
+    // Free Roam: Juggernauts among the police at 4 and 5 stars (police_juggernaut.h).
+    bool policeJuggernauts = true;
+    bool juggernautCinematics = true; // his entrance in three cuts, his death in slow motion
     bool autoVault = true, highClimb = true, smoothCollision = true;
     float mantleSpeed = 1.8f; // MW2 1.0
     float slideBoost = 1.3f, slideTime = 0.75f, vaultMinHeight = 0.0f, climbMaxHeight = 2.4f; // metres, seconds
@@ -170,6 +182,9 @@ Config LoadConfig() {
     c.mw2Blood = util::IniFlag(ini, "Mw2Blood", c.mw2Blood);
     c.killFeedback = util::IniFlag(ini, "KillFeedback", c.killFeedback);
     c.jumpSlowdown = util::IniFlag(ini, "JumpSlowdown", c.jumpSlowdown);
+    c.reloadSprint = util::IniFlag(ini, "ReloadSprint", c.reloadSprint);
+    c.policeJuggernauts = util::IniFlag(ini, "PoliceJuggernauts", c.policeJuggernauts);
+    c.juggernautCinematics = util::IniFlag(ini, "JuggernautCinematics", c.juggernautCinematics);
     c.autoVault = util::IniFlag(ini, "AutoVault", c.autoVault);
     c.highClimb = util::IniFlag(ini, "HighClimb", c.highClimb);
     c.smoothCollision = util::IniFlag(ini, "SmoothCollision", c.smoothCollision);
@@ -222,11 +237,15 @@ Config LoadConfig() {
     c.sprintTime = std::clamp(util::IniFloat(ini, "SprintTime", c.sprintTime), 1.0f, 16.0f);
     c.sprintRecharge = std::clamp(util::IniFloat(ini, "SprintRecharge", c.sprintRecharge), 1.0f, 4.0f);
     c.frags = std::clamp(static_cast<int>(util::IniFloat(ini, "Frags", static_cast<float>(c.frags))), 0, 20);
+#if CODV_EXPERIMENTAL
+    c.gameMode = experimental::ReadGameMode(ini);
+#endif
     c.killstreaks = util::IniFlag(ini, "Killstreaks", c.killstreaks);
     c.scavenger = util::IniFlag(ini, "Scavenger", c.scavenger);
     c.allKillstreaks = util::IniFlag(ini, "AllKillstreaks", c.allKillstreaks);
     c.spacedKillstreaks = util::IniFlag(ini, "SpacedKillstreaks", c.spacedKillstreaks);
     c.keepKillstreaks = util::IniFlag(ini, "KeepKillstreaksOnDeath", c.keepKillstreaks);
+    c.nukeKillsPlayer = util::IniFlag(ini, "NukeKillsPlayer", c.nukeKillsPlayer);
     c.fallDamage = std::clamp(static_cast<int>(util::IniFloat(ini, "FallDamage", static_cast<float>(c.fallDamage))), 0, 2);
     for (int i = 0; i < 3; ++i) {
         const std::string key = "Killstreak" + std::to_string(i + 1);
@@ -277,6 +296,11 @@ const std::vector<std::string> kRewardNames = {"Off",
 // New random guns at each switch-on: RandomLoadout, and always with weapon sets.
 bool RandomGuns(const Config& c) { return c.randomLoadout || c.weaponSets; }
 
+// Killstreaks and the kill counter belong to Free Roam.
+bool Streaks(const Config& c) {
+    return c.killstreaks && c.gameMode == 0;
+}
+
 void ApplyOptions(const Config& c) {
     g_runtime.SetOption(CV_OPT_ENABLED, c.enabled ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_QUICK_JUMP, c.quickJump ? 1.0f : 0.0f);
@@ -288,7 +312,7 @@ void ApplyOptions(const Config& c) {
     g_runtime.SetOption(CV_OPT_JUMP_HEIGHT, c.jumpHeight);
     g_runtime.SetOption(CV_OPT_SPRINT_TIME, c.sprintTime);
     g_runtime.SetOption(CV_OPT_SPRINT_RECHARGE, c.sprintRecharge);
-    g_runtime.SetOption(CV_OPT_KILLSTREAKS, c.killstreaks ? 1.0f : 0.0f);
+    g_runtime.SetOption(CV_OPT_KILLSTREAKS, Streaks(c) ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_SCAVENGER, c.scavenger ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_KS_KEEP_ON_DEATH, c.keepKillstreaks ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_KS_ALL, c.allKillstreaks ? 1.0f : 0.0f);
@@ -297,10 +321,11 @@ void ApplyOptions(const Config& c) {
     g_runtime.SetOption(CV_OPT_SLIDE, c.mw2.input.slide ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_SPRINT_SPEED, c.sprintSpeed);
     g_runtime.SetOption(CV_OPT_STAMINA_BAR, c.staminaBar ? 1.0f : 0.0f);
-    g_runtime.SetOption(CV_OPT_SCOREBAR, c.scorebar ? 1.0f : 0.0f);
+    g_runtime.SetOption(CV_OPT_SCOREBAR, c.scorebar && c.gameMode == 0 ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_BLOOD, c.mw2Blood ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_KILL_FEEDBACK, c.killFeedback ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_JUMP_SLOWDOWN, c.jumpSlowdown ? 1.0f : 0.0f);
+    g_runtime.SetOption(CV_OPT_RELOAD_SPRINT, c.reloadSprint ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_AUTO_VAULT, c.autoVault ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_HIGH_CLIMB, c.highClimb ? 1.0f : 0.0f);
     g_runtime.SetOption(CV_OPT_SNAG_GUARD, c.smoothCollision ? 1.0f : 0.0f);
@@ -378,6 +403,94 @@ int IndexOf(const std::vector<CvWeaponInfo>& list, const char* name, int fallbac
     return fallback;
 }
 
+// Each setting's short name in the menu and its line of help (shown while it is selected), by INI key.
+struct Description {
+    const char* key;
+    const char* label;
+    const char* help;
+};
+const Description kDescriptions[] = {
+    {"RandomLoadout", "Random guns", "New random MW2 guns each time CODV is switched on."},
+    {"WeaponSets", "Weapon sets", "Three random guns behind each number key; press it again for the next one."},
+    {"Mw2Missiles", "Long-range missiles", "Locked Stinger and Javelin shots fly CODV's own missiles, about 3 km."},
+    {"Mw2Primary", "Primary", "Your primary MW2 gun (with random guns off)."},
+    {"Mw2Secondary", "Secondary", "Your secondary MW2 gun (with random guns off)."},
+    {"AmmoScale", "Spare ammo", "Spare magazines carried, times MW2's (1 = MW2)."},
+    {"Frags", "Frag grenades", "Frags carried (G / RB: hold to cook, release to throw)."},
+    {"Scavenger", "Scavenger", "Hostile kills give a magazine for every gun and a frag, as MW2's perk."},
+    {"Primary", "Primary (GTA weapons)", "Primary of the interim gunplay used without an MW2 import."},
+    {"Secondary", "Secondary (GTA weapons)", "Secondary of the interim gunplay used without an MW2 import."},
+    {"NumberKeys", "Number keys", "1 primaries, 2 secondaries, 3 snipers, 5 launchers; press again for the group's next gun."},
+    {"RecoilScale", "Recoil", "Every weapon's kick, times MW2's."},
+    {"FireMode", "Shots", "CODV bullets (MW2 damage and spread) or GTA's trigger at CODV's timing."},
+    {"SoundGainDb", "Weapon volume", "MW2 weapon sounds, in dB over GTA's sound effects volume."},
+    {"GiveLoadout", "Give loadout", "Give the loadout weapons when CODV is switched on, if you lack them."},
+    {"MW2Movement", "MW2 movement", "MW2's own movement drives your character (off: GTA's walk and run)."},
+    {"MouseSensitivity", "Mouse sensitivity", "How fast the view turns with the mouse."},
+    {"InvertLook", "Invert look", "Up on the mouse or stick looks down."},
+    {"Fov", "Field of view", "MW2's horizontal field of view (MW2 = 65)."},
+    {"ThirdPerson", "Start in third person", "Begin in MW2's third-person camera."},
+    {"ThirdPersonKey", "View key", "C / Back switches first and third person; V changes the view in vehicles."},
+    {"SprintSpeed", "Sprint speed", "Sprint speed over running (MW2 = 1.50)."},
+    {"SprintTime", "Sprint time", "Seconds of sprint before the meter runs out (MW2 = 4)."},
+    {"SprintRecharge", "Sprint refill", "How fast the sprint meter refills, times MW2's."},
+    {"JumpHeight", "Jump height", "Jump height in MW2 units (MW2 = 39, about 1 m)."},
+    {"JumpSlowdown", "Landing slowdown", "MW2's slowdown when you land a jump (off: you keep your speed)."},
+    {"ReloadSprint", "Reload while sprinting", "Keep sprinting while reloading, a little slower. Off: the sprint waits for the reload."},
+    {"FallDamage", "Fall damage", "Off, light (from 6 m) or MW2's (from 3 m)."},
+    {"Lean", "Lean", "Hold Q / E to lean around corners; how far, in metres (0 = off)."},
+    {"SmoothCollision", "Smooth collision", "A run caught on an edge (a car's corner, a fence) keeps its speed."},
+    {"QuickJump", "Quick jump", "Jump without GTA's wind-up."},
+    {"ForceFirstPerson", "Force first person", "Keep GTA's camera in first person while CODV is on."},
+    {"Slide", "Slide", "Crouch while sprinting to slide."},
+    {"SlideSpeed", "Slide speed", "The slide's speed over the sprint at its start."},
+    {"SlideTime", "Slide length", "How long a slide lasts, in seconds."},
+    {"Dive", "Dive", "Hold crouch through a slide to dive and land prone."},
+    {"AutoVault", "Auto vault", "Sprint into a low ledge (a car, a wall) to vault it without stopping."},
+    {"VaultMinHeight", "Vault from", "Auto vault only over obstacles at least this tall (0 = every ledge)."},
+    {"MantleSpeed", "Mantle speed", "How fast mantles and vaults go, times MW2's."},
+    {"HighClimb", "High climb", "Jump at a ledge too tall for MW2's mantle to climb it."},
+    {"ClimbMaxHeight", "High climb up to", "The tallest ledge the high climb takes, in metres."},
+    {"AutoLadders", "Auto ladders", "Walk into a ladder to take it (Y on a pad always works)."},
+    {"Mw2Footsteps", "MW2 footsteps", "MW2's footsteps by surface, landings and gear rattle (off: GTA's)."},
+    {"Mw2Hud", "MW2 HUD", "MW2's ammo, compass, hit marker and damage arrows."},
+    {"StaminaBar", "Stamina bar", "The sprint meter on screen."},
+    {"KillCounter", "Kill counter", "Kills, streak and deaths in MW2's score bar (Free Roam)."},
+    {"Mw2Blood", "MW2 blood", "MW2's blood on the screen as your health drops."},
+    {"KillFeedback", "Kill points", "The yellow +100 and splashes like Headshot!"},
+    {"Crosshair", "Crosshair", "Show the crosshair."},
+    {"Hitmarker", "Hit marker", "Show the hit marker."},
+    {"HitSounds", "Hit sounds", "Play a sound on each hit."},
+    {"BodyPose", "Body animation", "MW2's animations on your character in third person."},
+    {"Debug", "Debug overlay", "Diagnostics on screen."},
+    {"Killstreaks", "Killstreaks", "Earn MW2's killstreaks from hostile kills; 4 / D-pad right calls one in."},
+    {"AllKillstreaks", "All killstreaks", "Every killstreak at its kill count. Off: only the three picks below (MW2)."},
+    {"SpacedKillstreaks", "Spaced kill counts", "One reward per count, up to the Nuke at 35. Off: MW2's counts (Nuke 25)."},
+    {"Killstreak1", "Killstreak 1", "Your first pick (with all killstreaks off)."},
+    {"Killstreak2", "Killstreak 2", "Your second pick (with all killstreaks off)."},
+    {"Killstreak3", "Killstreak 3", "Your third pick (with all killstreaks off)."},
+    {"KeepKillstreaksOnDeath", "Keep after death", "Unused killstreaks survive a death (MW2's rule)."},
+    {"NukeKillsPlayer", "Nuke kills you too", "The Tactical Nuke takes you out as well, with your vehicle (MW2's rule)."},
+    {"EmpKills", "EMP kills", "Kills for the EMP with MW2's counts (MW2 = 15)."},
+    {"RegenHealth", "Regenerating health", "Health comes back after a moment out of fire, as in MW2."},
+    {"StartEnabled", "Start with CODV on", "Every game session starts with CODV switched on."},
+    {"InMissions", "Active in missions", "Keep CODV on while a story mission runs."},
+    {"PoliceJuggernauts", "Police Juggernauts", "Free Roam: at 4 and 5 stars a heavily armoured Juggernaut may join the police."},
+    {"JuggernautCinematics", "Juggernaut cinematics", "His entrance in three cuts and his death in slow motion (you cannot be hurt meanwhile)."},
+};
+
+void Describe(menu::Model& m) {
+    for (menu::Item& it : m.items) {
+        if (it.key.empty()) continue;
+        for (const Description& d : kDescriptions)
+            if (it.key == d.key) {
+                it.label = d.label;
+                it.help = d.help;
+                break;
+            }
+    }
+}
+
 menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const CvRules& rules,
                       const std::vector<CvWeaponInfo>& mw2Guns) {
     menu::Model m;
@@ -389,7 +502,14 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     const auto apply = [&c](auto set) { return [&c, set](float v) { set(v); ApplyOptions(c); }; };
     auto& items = m.items;
     // Item 0 is the live mode (not saved; ScriptMain keeps it in sync with the toggle).
-    items.push_back(menu::Flag("CODV mode (wheel: MW2 / F10)", "", c.enabled, [](float) { g_modeToggle = true; }));
+    items.push_back(menu::Flag("CODV mode", "", c.enabled, [](float) { g_modeToggle = true; }));
+    items.back().help = "Switch CODV on or off (also F10, Back + RB, or MW2 in GTA's weapon wheel).";
+#if CODV_EXPERIMENTAL
+    // The game mode (experimental builds only).
+    items.push_back(menu::Choice("Game mode", "GameMode", c.gameMode, experimental::kModeNames,
+                                 apply([&c](float v) { c.gameMode = experimental::ClampMode(static_cast<int>(v)); })));
+    items.back().help = experimental::kModeHelp;
+#endif
 
     items.push_back(menu::Section("Weapons"));
     if (!mw2Guns.empty()) {
@@ -437,7 +557,7 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     items.push_back(menu::Flag("Number keys (1 primary, 2 secondary, 3 sniper, 5 launcher; again: next)", "NumberKeys", c.mw2.numberKeys,
                                [&c](float v) { c.mw2.numberKeys = v != 0; }));
     items.push_back(menu::Number("Recoil", "RecoilScale", c.recoil, 0.25f, 2.0f, 0.25f, "%.2fx", apply([&c](float v) { c.recoil = v; })));
-    items.push_back(menu::Choice("Shots", "FireMode", c.fireMode, {"CODV bullets (CODV damage)", "GTA trigger (GTA damage)"},
+    items.push_back(menu::Choice("Shots", "FireMode", c.fireMode, {"CODV bullets", "GTA trigger"},
                                  [&c](float v) { c.fireMode = static_cast<int>(v); }));
     items.push_back(menu::Number("MW2 weapon volume", "SoundGainDb", c.soundGainDb, -24.0f, 12.0f, 1.0f, "%+.0f dB", [&c](float v) {
         c.soundGainDb = v;
@@ -466,7 +586,9 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
                                  apply([&c](float v) { c.jumpHeight = v; })));
     items.push_back(menu::Flag("MW2 jump slowdown (landing)", "JumpSlowdown", c.jumpSlowdown,
                                apply([&c](float v) { c.jumpSlowdown = v != 0; })));
-    items.push_back(menu::Choice("Fall damage", "FallDamage", c.fallDamage, {"Off", "Light (from 6 m)", "MW2 (from 3 m)"},
+    items.push_back(menu::Flag("Reload while sprinting (a little slower)", "ReloadSprint", c.reloadSprint,
+                               apply([&c](float v) { c.reloadSprint = v != 0; })));
+    items.push_back(menu::Choice("Fall damage", "FallDamage", c.fallDamage, {"Off", "Light", "MW2"},
                                  apply([&c](float v) { c.fallDamage = std::clamp(static_cast<int>(v), 0, 2); })));
     items.push_back(menu::Number("Lean (Q / E; 0 = off)", "Lean", c.leanReach, 0.0f, 0.6f, 0.1f, "%.1f m",
                                  apply([&c](float v) { c.leanReach = v < 0.1f ? 0.0f : v; })));
@@ -528,6 +650,8 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     }
     items.push_back(menu::Flag("Keep unused killstreaks after death (MW2)", "KeepKillstreaksOnDeath", c.keepKillstreaks,
                                apply([&c](float v) { c.keepKillstreaks = v != 0; })));
+    items.push_back(menu::Flag("Tactical Nuke kills you too (MW2)", "NukeKillsPlayer", c.nukeKillsPlayer,
+                               [&c](float v) { c.nukeKillsPlayer = v != 0; }));
     items.push_back(menu::Number("EMP kills (MW2 = 15; not with spaced counts)", "EmpKills", static_cast<float>(c.empKills), 3.0f, 25.0f, 1.0f, "%.0f",
                                  apply([&c](float v) { c.empKills = static_cast<int>(v); })));
     // Testing: the picked killstreak goes straight into the player's hand (4 / D-pad right calls it in).
@@ -535,6 +659,7 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
         const int i = static_cast<int>(v);
         if (i > 0 && i < static_cast<int>(std::size(kRewardChoices))) ksfeed::GrantForTest(kRewardChoices[i]);
     }));
+    items.back().help = "Pick a killstreak to put it in your hand right away (4 / D-pad right calls it in).";
 
     items.push_back(menu::Section("Game"));
     items.push_back(menu::Flag("Regenerating health", "RegenHealth", c.regen, apply([&c](float v) { c.regen = v != 0; })));
@@ -542,6 +667,16 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
                                [&c](float v) { c.startEnabled = v != 0; }));
     items.push_back(menu::Flag("Active during missions", "InMissions", c.life.inMissions,
                                [&c](float v) { c.life.inMissions = v != 0; }));
+    items.push_back(menu::Flag("Police Juggernauts (4-5 stars, Free Roam)", "PoliceJuggernauts", c.policeJuggernauts,
+                               [&c](float v) { c.policeJuggernauts = v != 0; }));
+    items.push_back(menu::Flag("Juggernaut cinematics (entrance, death)", "JuggernautCinematics", c.juggernautCinematics,
+                               [&c](float v) { c.juggernautCinematics = v != 0; }));
+    // Testing: a Juggernaut ahead of the player (each press), cinematics included.
+    items.push_back(menu::Action("Test: spawn a Juggernaut", [](float) { jugg::RequestTestSpawn(); }));
+    items.back().help = "Puts a Juggernaut ahead of you now (Free Roam, CODV on), cinematics included.";
+    items.push_back(menu::Action("Test: spawn a minigun Juggernaut", [](float) { jugg::RequestTestSpawn(true); }));
+    items.back().help = "The rare one (1% of Juggernauts): a minigun instead of the heavy machine gun.";
+    Describe(m);
     return m;
 }
 
@@ -621,6 +756,13 @@ void ScriptMain() {
     movers::Gatherer gatherer;
     mw2::Driver mw2drv(g_runtime, Log);
     lifecycle::ReasonLog reasons;
+#if CODV_EXPERIMENTAL
+    experimental::Modes experimentalModes;
+    // tools/build-release.py refuses a binary that holds this line.
+    Log("CODV: experimental build (not for release)");
+#endif
+    jugg::Squad juggernauts;
+    int lastGameMode = cfg.gameMode;
     const std::vector<CvWeaponInfo> mw2Guns = g_runtime.Mw2Guns();
     Logf("CODV: %zu MW2 guns in the menu", mw2Guns.size());
     menu::Model settingsMenu = BuildMenu(cfg, weapons, rules, mw2Guns);
@@ -693,7 +835,9 @@ void ScriptMain() {
         if (!Call<BOOL>(gta::GET_IS_LOADING_SCREEN_ACTIVE) &&
             Call<BOOL>(gta::IS_PLAYER_CONTROL_ON, Call<Player>(gta::PLAYER_ID)))
             drive.Preload(now);
-        const char* blocked = lifecycle::Blocked(player, cfg.life, settingsMenu.open);
+        const char* blocked = lifecycle::Blocked(player, cfg.life);
+        // The CODV menu open: CODV stays on (view, gun, HUD), the player stands still while the keys drive the menu.
+        mw2drv.FreezeInput(settingsMenu.open);
         reasons.Update(blocked, [](const char* r) { Logf("CODV: %s", r); });
 
         // The MW2 item picked in GTA's weapon wheel turns the mode on (off: F10, the chord or the menu).
@@ -718,7 +862,7 @@ void ScriptMain() {
         cf.blockSprint = (last.flags & CV_OUT_BLOCK_SPRINT) != 0;
         cf.quickJump = cfg.quickJump;
         cf.mw2 = want && mw2drv.Active();
-        cf.rewardHeld = cfg.killstreaks && ksfeed::Holding();
+        cf.rewardHeld = Streaks(cfg) && ksfeed::Holding();
         cf.remote = remoteView;
         cf.lean = cfg.leanReach > 0.0f;
         cf.buttons = buttons;
@@ -727,11 +871,20 @@ void ScriptMain() {
         // F5c: the killstreaks (counted while MW2 drives the player; never in a story mission).
         {
             const bool mission = Call<BOOL>(gta::GET_MISSION_FLAG) != FALSE;
+            // A new game mode: the streak count restarts and a killstreak still running ends.
+            const bool modeChanged = cfg.gameMode != lastGameMode;
+            if (modeChanged) {
+                Logf("CODV: game mode %d", cfg.gameMode);
+                lastGameMode = cfg.gameMode;
+            }
+            // Another game mode than Free Roam (experimental builds): the feed still runs for Scavenger and the
+            // kill points (the runtime earns no streak), and the Juggernauts stay away.
+            const bool otherMode = cfg.gameMode != 0;
             ksfeed::Frame kf;
-            kf.enabled = cfg.killstreaks;
+            kf.enabled = cfg.killstreaks || otherMode;
             kf.allowed = want && mw2drv.Active() && !mission;
-            kf.stopEffects = !cfg.enabled || mission;
-            kf.modeOff = modeSwitchedOff;
+            kf.stopEffects = !cfg.enabled || mission || otherMode;
+            kf.modeOff = modeSwitchedOff || modeChanged;
             kf.menuOpen = settingsMenu.open;
             kf.buttons = buttons;
             // Hostile kills count while the mode is on (on foot, in a vehicle, in a killstreak's view),
@@ -743,14 +896,26 @@ void ScriptMain() {
             kf.dt = Call<float>(gta::GET_FRAME_TIME);
             kf.look.mouseSensitivity = cfg.mw2.input.mouseSensitivity;
             kf.look.invertLook = cfg.mw2.input.invertLook;
+            kf.nukeKillsPlayer = cfg.nukeKillsPlayer;
             ksfeed::Tick(g_runtime, player, kf, Log);
             modeSwitchedOff = false;
+            const float view = mw2drv.CurrentView().active ? mw2drv.CurrentView().heading
+                                                           : Call<Vector3>(gta::GET_GAMEPLAY_CAM_ROT, 2).z;
+#if CODV_EXPERIMENTAL
+            experimentalModes.Tick(player, cfg.gameMode, cfg.enabled && g_runtime.IsLoaded() && !mission, view, Log);
+#endif
+            // Free Roam: Juggernauts join the police at four and five stars.
+            const bool juggOn = !otherMode && cfg.policeJuggernauts && cfg.enabled && g_runtime.IsLoaded() && !mission;
+            juggernauts.Tick(g_runtime, player, juggOn, view, cfg.juggernautCinematics, cfg.mw2Hud && want, Log);
         }
-        // A killstreak's camera has the view: MW2's eye steps aside, then comes back.
-        const bool remote = ksfeed::RemoteActive();
+        // A killstreak's camera (or a Juggernaut cinematic) has the view: MW2's eye steps aside, then comes back.
+        const bool cinematic = juggernauts.CinematicActive();
+        const bool remote = ksfeed::RemoteActive() || cinematic;
         if (remote != remoteView) {
             remoteView = remote;
             mw2drv.Suspend(remote);
+            // Not under MW2 (a vehicle, GTA's camera): GTA's own camera back.
+            if (!remote && !mw2drv.Active()) Call<void>(gta::RENDER_SCRIPT_CAMS, FALSE, FALSE, 0, TRUE, FALSE, 0);
         }
         if (!want) {
             vmfeed::Update(g_runtime, vmfeed::Input{});
@@ -767,6 +932,8 @@ void ScriptMain() {
             Log("CODV: driving the player");
         }
         if (remoteView) {
+            // Kills while a camera has the view count too: the Juggernaut dying in his cinematic, a gunship's.
+            drive.Scan(player, now, ksfeed::Attacking());
             // The MW2 player waits frozen where it stands; only MW2's HUD (the killstreak's overlay) and sounds run.
             vmfeed::Update(g_runtime, vmfeed::Input{});
             vmfeed::HudInput hi;
@@ -774,6 +941,7 @@ void ScriptMain() {
             hi.fovY = 50.0f;
             hi.crosshair = false;
             hi.weaponBar = cfg.mw2Hud;
+            hi.cinematic = cinematic; // a cinematic: MW2's splash (his title) alone
             vmfeed::UpdateHud(g_runtime, hi);
             bodyfeed::Tick(g_runtime, player, false, 0.0f, Log);
             gtaaudio::Tick(true);
@@ -920,8 +1088,11 @@ void ScriptMain() {
             char line[512];
             std::snprintf(line, sizeof(line), "CODV %s | %s", g_runtime.StatusText().c_str(), drive.Status().c_str());
             hud::DrawText(line, 0.01f, 0.01f, 0.3f, 255, 255, 255, false);
-            const std::string mw2Line =
-                mw2drv.Status() + " | " + vmfeed::Status() + " | " + bodyfeed::Status() + " | " + gtaaudio::Status() + " | " + grenadefeed::Status() + " | " + ksfeed::Status();
+            std::string mw2Line =
+                mw2drv.Status() + " | " + vmfeed::Status() + " | " + bodyfeed::Status() + " | " + gtaaudio::Status() + " | " + grenadefeed::Status() + " | " + ksfeed::Status() + " | " + juggernauts.Status();
+#if CODV_EXPERIMENTAL
+            mw2Line += " | " + experimentalModes.Status();
+#endif
             hud::DrawText(mw2Line.c_str(), 0.01f, 0.07f, 0.3f, 160, 200, 255, false);
             if (cfg.enabled) mw2drv.DrawDebug(player, GetTickCount());
         }

@@ -177,6 +177,8 @@ pub struct Arms {
     /// CODV's weapon sets: the loadout is SETS groups back to back (`set_len` guns each), a number
     /// key takes its group's last gun and, pressed again, the group's next one.
     pub sets: bool,
+    /// CODV's reload while sprinting (CV_OPT_RELOAD_SPRINT), handed to the gunner each tick.
+    pub reload_sprint: bool,
     set_len: [usize; SETS],
     /// The loadout index asked for last, and each group's last one.
     selected: usize,
@@ -305,6 +307,7 @@ impl Arms {
             kills: 0,
             rng,
             sets: false,
+            reload_sprint: false,
             set_len: [0; SETS],
             selected: 0,
             set_last: [0; SETS],
@@ -376,6 +379,7 @@ impl Arms {
                 g.select((n - 2) as usize)
             }
         }
+        g.reload_sprint = self.reload_sprint;
         g.arm(player, arsenal);
     }
 

@@ -421,6 +421,7 @@ void Driver::NoteHit(Ped player, Ped target, DWORD now) {
     f.inCombatWithPlayer = Call<BOOL>(gta::IS_PED_IN_COMBAT, target, player) != FALSE;
     f.relationship = Call<int>(gta::GET_RELATIONSHIP_BETWEEN_PEDS, target, player);
     f.damagedPlayer = Call<BOOL>(gta::HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY, player, target, TRUE) != FALSE;
+    f.scriptedEnemy = Call<Hash>(gta::GET_PED_RELATIONSHIP_GROUP_HASH, target) == ksrules::kScriptedEnemyGroup;
     const bool hostile = ksrules::IsHostile(f);
     for (Recent& r : recent_) {
         if (r.ped != target) continue;
@@ -715,6 +716,7 @@ void Driver::ScanDeaths(Ped player, DWORD now, const Settings& s) {
             f.inCombatWithPlayer = Call<BOOL>(gta::IS_PED_IN_COMBAT, p, player) != FALSE;
             f.relationship = Call<int>(gta::GET_RELATIONSHIP_BETWEEN_PEDS, p, player);
             f.damagedPlayer = Call<BOOL>(gta::HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY, player, p, TRUE) != FALSE;
+            f.scriptedEnemy = Call<Hash>(gta::GET_PED_RELATIONSHIP_GROUP_HASH, p) == ksrules::kScriptedEnemyGroup;
             hostile = ksrules::IsHostile(f);
         }
         if (!hostile) continue;
@@ -803,7 +805,9 @@ void Driver::Apply(Ped player, const CvInput& in, const CvOutput& out, const Set
         if (s.fire == FireMode::Bullet && out.ammo_used > 0 && !mw2)
             Call<void>(gta::SET_PED_AMMO, player, in.gta_weapon, static_cast<int>(in.gta_ammo - std::min(in.gta_ammo, out.ammo_used)), FALSE);
         Call<BOOL>(gta::SET_AMMO_IN_CLIP, player, in.gta_weapon, static_cast<int>(out.hud.mag));
-        if ((out.flags & CV_OUT_RELOAD) && !vehicle) Call<void>(gta::TASK_RELOAD_WEAPON, player, TRUE);
+        // Not under MW2: its body pose plays the reload, and GTA's reload task held the ped's weapon until
+        // its animation ended (a switch mid-reload waited for it).
+        if ((out.flags & CV_OUT_RELOAD) && !vehicle && !mw2) Call<void>(gta::TASK_RELOAD_WEAPON, player, TRUE);
         if (mw2) {
             kick_[0] += out.kick[0];
             kick_[1] += out.kick[1];

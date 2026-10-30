@@ -33,7 +33,7 @@ KEEP_KEYS = ['StartEnabled', 'ToggleKey', 'ToggleChord', 'Primary', 'Secondary',
              'FireMode', 'RegenHealth', 'QuickJump', 'ForceFirstPerson', 'Crosshair', 'Hitmarker', 'HitSounds',
              'AmmoCounter', 'DamageFlash', 'InMissions', 'Debug', 'VerboseLog', 'MenuChord', 'StrictVersion', 'Runtime',
              'DataRoot', 'SoundGainDb', 'Mw2Primary', 'Mw2Secondary', 'AmmoScale', 'Frags', 'JumpHeight', 'SprintTime', 'SprintRecharge', 'NumberKeys', 'RandomLoadout', 'WeaponSets', 'Mw2Missiles', 'Mw2Hud',
-             'Killstreaks', 'AllKillstreaks', 'SpacedKillstreaks', 'Scavenger', 'Killstreak1', 'Killstreak2', 'Killstreak3', 'EmpKills', 'KeepKillstreaksOnDeath', 'FallDamage', 'Slide', 'SprintSpeed', 'StaminaBar', 'JumpSlowdown', 'AutoVault', 'MantleSpeed', 'HighClimb', 'Dive', 'SmoothCollision', 'SlideSpeed', 'SlideTime', 'VaultMinHeight', 'ClimbMaxHeight', 'Mw2Footsteps', 'Lean', 'AutoLadders', 'KillCounter', 'Mw2Blood', 'KillFeedback', 'ThirdPerson', 'ThirdPersonKey']
+             'Killstreaks', 'AllKillstreaks', 'SpacedKillstreaks', 'Scavenger', 'Killstreak1', 'Killstreak2', 'Killstreak3', 'EmpKills', 'KeepKillstreaksOnDeath', 'NukeKillsPlayer', 'FallDamage', 'Slide', 'SprintSpeed', 'StaminaBar', 'JumpSlowdown', 'ReloadSprint', 'PoliceJuggernauts', 'JuggernautCinematics', 'AutoVault', 'MantleSpeed', 'HighClimb', 'Dive', 'SmoothCollision', 'SlideSpeed', 'SlideTime', 'VaultMinHeight', 'ClimbMaxHeight', 'Mw2Footsteps', 'Lean', 'AutoLadders', 'KillCounter', 'Mw2Blood', 'KillFeedback', 'ThirdPerson', 'ThirdPersonKey']
 
 
 class SetupError(Exception):

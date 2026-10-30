@@ -5,8 +5,7 @@
 namespace lifecycle {
 using gta::Call;
 
-const char* Blocked(Ped ped, const Settings& s, bool menuOpen) {
-    if (menuOpen) return "CODV menu open";
+const char* Blocked(Ped ped, const Settings& s) {
     if (Call<BOOL>(gta::NETWORK_IS_GAME_IN_PROGRESS)) return "GTA Online session (Story Mode only)";
     if (Call<BOOL>(gta::GET_IS_LOADING_SCREEN_ACTIVE)) return "loading screen";
     if (!Call<BOOL>(gta::IS_PLAYER_PLAYING, Call<Player>(gta::PLAYER_ID))) return "player not in control";

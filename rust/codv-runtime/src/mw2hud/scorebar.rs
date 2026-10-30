@@ -6,7 +6,9 @@
 //!   past the last one), "Streak N" beside it;
 //! * the bottom (red) bar: the session's kills over kills and deaths, "Deaths N" beside it;
 //! * on a death, MW2's "Round Over" in the middle of the screen with that life's kills and the
-//!   session's total, for a few seconds once the HUD is back.
+//!   session's total, for a few seconds once the HUD is back;
+//! * CODV's round: "Round N" in small under "Kills", one more each time a Tactical Nuke ends the run
+//!   (its streak starts over).
 //!
 //! The bar fills follow the menu's own expressions: width 20 / 1.5 + share x 172 / 1.5, the cap
 //! at (132 + 20) / 1.5 + share x 172 / 1.5 - 6 / 1.5.
@@ -29,6 +31,8 @@ pub struct Score {
     pub deaths: u32,
     /// The next killstreak picked: (kills it needs); None past the last one.
     pub next: Option<i32>,
+    /// Runs a Tactical Nuke ended since the mode was switched on: the round shown is one more.
+    pub nukes: u32,
     /// The last life's kills, waiting to show "Round Over" (start: when the HUD drew it first).
     round_over: Option<(u32, Option<i32>)>,
 }
@@ -43,6 +47,18 @@ impl Score {
         self.deaths += 1;
         self.round_over = Some((self.life, None));
         self.life = 0;
+    }
+
+    /// The Tactical Nuke over: this life's streak starts again (the session's kills stay) and a new
+    /// round begins.
+    pub fn start_over(&mut self) {
+        self.life = 0;
+        self.nukes += 1;
+    }
+
+    /// The round under way, from 1.
+    pub fn round(&self) -> u32 {
+        self.nukes + 1
     }
 
     /// The mode switched off: a new session.
@@ -110,14 +126,19 @@ impl Mw2Hud {
             text_style: 3,
             ..Default::default()
         };
-        // The icon square: the session's kills, "Kills" under them.
-        let square = [bg.rect[0] + 5.333, bg.rect[1] + 4.0, 54.667, 54.667 * 0.62];
+        // The icon square: the session's kills, "Kills" under them, the round in small under that.
+        let side = 54.667;
+        let square = [bg.rect[0] + 5.333, bg.rect[1] + 3.0, side, side * 0.52];
         let total = self.score.total.to_string();
         self.item_text(out, sp, &text(square, 1 | 8, 0.5, [1.0; 4]), &total, [1.0; 4]);
         let caption = self.data.string("CGAME_SB_KILLS").unwrap_or("Kills").to_owned();
-        let under = [square[0], square[1] + square[3], square[2], 54.667 * 0.3];
+        let under = [square[0], square[1] + square[3], side, side * 0.22];
         let grey = [0.85, 0.85, 0.85, 0.9];
-        self.item_text(out, sp, &text(under, 1 | 8, 0.25, grey), &caption, grey);
+        self.item_text(out, sp, &text(under, 1 | 8, 0.22, grey), &caption, grey);
+        let gold = [1.0, 0.8, 0.4, 0.95];
+        let low = [square[0], under[1] + under[3], side, side * 0.2];
+        let round = format!("Round {}", self.score.round());
+        self.item_text(out, sp, &text(low, 1 | 8, 0.17, gold), &round, gold);
         // Beside the bars: "Streak N" (top), "Deaths N" (bottom).
         let x = bg.rect[0] + 232.0;
         let streak = self.data.string("MENU_STREAK").unwrap_or("Streak").to_owned();
@@ -186,6 +207,12 @@ mod tests {
         assert_eq!(s.round_over, Some((3, None)));
         s.next = None;
         assert_eq!(s.streak_share(), 1.0, "past the last killstreak: full");
+        assert_eq!(s.round(), 1);
+        s.kills(35);
+        s.start_over();
+        assert_eq!((s.round(), s.life, s.total), (2, 0, 38), "a nuke: a new round, the session's kills kept");
+        s.start_over();
+        assert_eq!(s.round(), 3);
         s.reset();
         assert_eq!(s, Score::default());
     }

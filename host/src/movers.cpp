@@ -44,6 +44,12 @@ bool Gatherer::Add(int entity, std::uint32_t kind) {
             return false;
     } else if (kind == CV_MOVER_OBJECT && Call<BOOL>(gta::IS_ENTITY_ATTACHED, entity)) {
         return false;
+    } else if (kind == CV_MOVER_OBJECT && Call<BOOL>(gta::HAS_OBJECT_BEEN_BROKEN, entity, 0)) {
+        // A breakable prop that broke (a fence blown apart): its model's collision is the whole prop,
+        // read once per model, so it stood as an invisible wall where the prop was. Its pieces are
+        // objects of their own; what is left standing of it is passable now.
+        ++stats_.broken;
+        return false;
     }
     const Hash model = Call<Hash>(gta::GET_ENTITY_MODEL, entity);
     auto [box, fresh] = boxes_.try_emplace(model);

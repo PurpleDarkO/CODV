@@ -44,6 +44,8 @@ bool RuntimeBridge::Load(const wchar_t* dllPath, const std::string& dataRoot, co
         !Resolve(module_, "cv_mw2_ready_hashes", readyHashes_, error) ||
         !Resolve(module_, "cv_mw2_lock_kind", lockKind_, error))
         return false;
+    // Optional exports (additions to the ABI): missing in an older runtime, the host does without.
+    splash_ = reinterpret_cast<CvMw2SplashFn>(GetProcAddress(module_, "cv_mw2_splash"));
     apiVersion_ = version();
     if (apiVersion_ != CODV_ABI_VERSION) {
         error = "runtime ABI " + std::to_string(apiVersion_) + ", host expects " + std::to_string(CODV_ABI_VERSION) +
@@ -213,6 +215,10 @@ void RuntimeBridge::KillstreakView(const CvStreakView& view) {
 
 std::uint32_t RuntimeBridge::PlayAlias(const char* alias) {
     return runtime_ && alias ? playAlias_(runtime_, alias) : 0;
+}
+
+bool RuntimeBridge::Splash(const char* title, const char* description, const float glow[4]) {
+    return runtime_ && splash_ && title && splash_(runtime_, title, description, glow) != 0;
 }
 
 bool RuntimeBridge::WeaponNumbers(const char* name, CvWeaponNumbers& out) const {

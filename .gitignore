@@ -27,6 +27,10 @@ mw2/
 # A player's own settings (the template is tools/CodVLegacy.ini.template)
 CodVLegacy.ini
 
+# Modes still in the works: local only, never published (host/CMakeLists.txt builds them in when present)
+_experimental/
+/experimental/
+
 # Logs and captures
 *.log
 *.dmp

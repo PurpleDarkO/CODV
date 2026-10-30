@@ -107,6 +107,7 @@ enum CvOption : std::uint32_t {
     CV_OPT_WEAPON_SETS = 45,      // up to 3 random guns per number key, the key again for the next (1; CODV's INI default)
     CV_OPT_KS_SPACED = 44,        // CODV's spaced kill counts, UAV 3 .. Tactical Nuke 35 (1; CODV's INI default); 0: MW2's
     CV_OPT_KS_ALL = 43,           // every killstreak comes at its kill count (1; CODV's INI default); 0: the three picks (MW2)
+    CV_OPT_RELOAD_SPRINT = 46,    // reload while sprinting, a little slower (1, the default); 0: the sprint waits for the reload
 };
 
 // Killstreak rewards (MW2's killstreakTable references); stage 1 implements UAV and EMP.
@@ -462,6 +463,7 @@ struct CvHudQuad {
 };
 #define CV_HUD_THIRD_PERSON 1u
 #define CV_HUD_VEHICLE 2u // ABI 10: GTA has the player in a vehicle: no weapon bar, sprint meter or compass
+#define CV_HUD_CINEMATIC 4u // a host cinematic has the view (a Juggernaut's entrance): only MW2's splashes
 // CvHudQuad.flags: the alpha is masked by the image in bits 8.. over the quad's unrotated rectangle.
 #define CV_HUD_QUAD_MASKED 1u
 #define CV_HUD_MAX_GRENADES 8
@@ -488,6 +490,9 @@ static_assert(sizeof(CvHudQuad) == 88 && sizeof(CvHudDrawInput) == 128 && offset
 #define CV_STREAK_DIED 2u
 #define CV_STREAK_ACTIVATE 4u
 #define CV_STREAK_RESET 8u
+// The Tactical Nuke is over (its blast's kills counted): the streak starts again from zero and the rewards
+// still held are cleared. Optional: a runtime without it ignores the bit (ABI 10 unchanged).
+#define CV_STREAK_NUKE_OVER 16u
 struct CvStreakInput {
     std::uint32_t size;
     std::uint32_t flags;
@@ -615,6 +620,9 @@ typedef std::uint32_t (*CvKillstreakStepFn)(void*, const CvStreakInput*, CvStrea
 // started); an MW2 weapon's numbers by name (0: not imported); refill the MW2 player's guns.
 typedef std::uint32_t (*CvKillstreakViewFn)(void*, const CvStreakView*);
 typedef std::uint32_t (*CvPlayAliasFn)(void*, const char*);
+// The host's own splash in MW2's killstreak splash (title, the line under it, the title's glow RGBA 0..1
+// or null for MW2's orange); 1 when queued, 0 without the import's HUD. Optional export (an ABI 10 addition).
+typedef std::uint32_t (*CvMw2SplashFn)(void*, const char* title, const char* description, const float* glow);
 typedef std::uint32_t (*CvMw2WeaponNumbersFn)(const void*, const char*, CvWeaponNumbers*);
 typedef std::uint32_t (*CvMw2RefillFn)(void*);
 // ABI 10: the image file stems of the view models the player can hold next ("c:stem" colour maps,

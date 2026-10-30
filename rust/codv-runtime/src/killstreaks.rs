@@ -180,6 +180,13 @@ impl Streaks {
         std::mem::take(&mut self.held).len()
     }
 
+    /// The Tactical Nuke called in ends the run (MW2 ends the match on it): the streak starts again
+    /// from zero and the rewards not used yet are gone. How many were dropped.
+    pub fn start_over(&mut self) -> usize {
+        self.streak = 0;
+        self.drop_held()
+    }
+
     /// Uses the top reward (action slot 4).
     pub fn activate(&mut self) -> Option<u32> {
         if !self.enabled {
@@ -192,6 +199,22 @@ impl Streaks {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_nuke_starts_the_streak_over_without_the_rewards_held() {
+        let mut s = Streaks::new(&[]);
+        s.all = true;
+        s.spaced = true;
+        for _ in 0..35 {
+            s.kill();
+        }
+        assert_eq!(s.top(), Some(NUKE));
+        assert_eq!(s.activate(), Some(NUKE));
+        assert!(s.held() > 0, "the rewards earned before it wait on the stack");
+        assert!(s.start_over() > 0);
+        assert_eq!((s.streak, s.held(), s.top()), (0, 0, None));
+        assert_eq!(s.next_kills(), Some(3), "back to the first reward");
+    }
 
     #[test]
     fn rewards_come_at_their_kill_counts_and_wait_on_a_stack() {

@@ -1,6 +1,6 @@
 [package]
 name = "codv-engine"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 publish = false
 description = "CODV's bridge to the Modern Warfare 2 engine code of iw4L: the player's pmove against a host-supplied world, in GTA-friendly units"

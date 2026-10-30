@@ -61,6 +61,8 @@ public:
     // ABI 9: the killstreak view for MW2's HUD; an imported MW2 sound; an MW2 weapon's numbers; ammo refill.
     void KillstreakView(const CvStreakView& view);
     std::uint32_t PlayAlias(const char* alias);
+    // MW2's killstreak splash with the host's own title (false: no import HUD, or an older runtime).
+    bool Splash(const char* title, const char* description, const float glow[4]);
     bool WeaponNumbers(const char* name, CvWeaponNumbers& out) const;
     bool Refill();
     // ABI 10: the images the next view models and MW2's HUD draw with (any thread; slow: decodes models).
@@ -110,6 +112,7 @@ private:
     CvKillstreakStepFn killstreakStep_ = nullptr;
     CvKillstreakViewFn killstreakView_ = nullptr;
     CvPlayAliasFn playAlias_ = nullptr;
+    CvMw2SplashFn splash_ = nullptr; // optional
     CvMw2WeaponNumbersFn weaponNumbers_ = nullptr;
     CvMw2RefillFn refill_ = nullptr;
     CvVmReadyImagesFn vmReadyImages_ = nullptr;

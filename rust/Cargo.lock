@@ -33,11 +33,11 @@ dependencies = [
 
 [[package]]
 name = "codv-core"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "codv-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anim_iw4",
  "clipmap_iw4",
@@ -53,11 +53,11 @@ dependencies = [
 
 [[package]]
 name = "codv-gtaworld"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "codv-mw2data"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anim_iw4",
  "asset_iw4",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "codv-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "codv-core",
  "codv-engine",

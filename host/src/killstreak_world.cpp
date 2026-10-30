@@ -44,6 +44,7 @@ bool Hostile(Ped ped, Ped player) {
     f.inCombatWithPlayer = Call<BOOL>(gta::IS_PED_IN_COMBAT, ped, player) != FALSE;
     f.relationship = Call<int>(gta::GET_RELATIONSHIP_BETWEEN_PEDS, ped, player);
     f.damagedPlayer = Call<BOOL>(gta::HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY, player, ped, TRUE) != FALSE;
+    f.scriptedEnemy = Call<Hash>(gta::GET_PED_RELATIONSHIP_GROUP_HASH, ped) == ksrules::kScriptedEnemyGroup;
     return ksrules::IsHostile(f);
 }
 
