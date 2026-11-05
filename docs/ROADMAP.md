@@ -26,12 +26,19 @@ GTA is the world. Every MW2 asset is read from the player's own copy at setup ti
 | Killstreaks | The nuke ends the run (the streak and the held rewards start over), a round counter, an option for the nuke to kill the player; kills count in killstreak views; animals never count |
 | Menu | A new look for the CODV menu; CODV stays on while it is open |
 
+## In 0.3.0
+
+| Area | What came |
+|---|---|
+| Weapons | Lethal on G (frag, Semtex, C4, Claymore, throwing knife) and tactical on T (flashbang, stun, smoke), with MW2's animations and icons; a damage setting |
+| View | The gun follows the light around it; it fades under GTA's minimap |
+| Police | Juggernauts far apart at five stars; a 30 s head start after the nuke |
+| Movement | Ladders by holding C; no invisible walls around sprinklers or people lying down |
+
 ## Next
 
 - Movement tuning: the remaining small hitches at car corners and low fences.
-- More of MW2's arsenal: the Riot Shield, attachments (sights, suppressors, grips), equipment (Claymore, C4,
-  Semtex, throwing knife) and special grenades (flash, stun, smoke).
-- An in-flight sound for CODV's own missiles.
+- More of MW2's arsenal: the Riot Shield, and attachments (sights, suppressors, grips).
 
 ## Later
 

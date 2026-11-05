@@ -25,6 +25,10 @@ inline constexpr int kThrowGrenade = 58;
 // Keys 1 / 2 / 3 / 5: GTA's SELECT_WEAPON_UNARMED / MELEE / SHOTGUN / SPECIAL (CODV's primary /
 // secondary / sniper / launcher under MW2; 4 is the killstreak's action slot).
 inline constexpr int kSlotKeys[4] = {157, 158, 160, 165};
+// Key 6 (GTA's SELECT_WEAPON_HANDGUN): CODV's C4 detonator under MW2.
+inline constexpr int kEquipmentKey = 159;
+// T (GTA's MP_TEXT_CHAT_ALL, unused in story mode): MW2's special grenade under MW2.
+inline constexpr int kTacticalKey = 245;
 
 struct Binding {
     int control;

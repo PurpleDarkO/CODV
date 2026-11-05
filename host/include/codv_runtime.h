@@ -108,6 +108,8 @@ enum CvOption : std::uint32_t {
     CV_OPT_KS_SPACED = 44,        // CODV's spaced kill counts, UAV 3 .. Tactical Nuke 35 (1; CODV's INI default); 0: MW2's
     CV_OPT_KS_ALL = 43,           // every killstreak comes at its kill count (1; CODV's INI default); 0: the three picks (MW2)
     CV_OPT_RELOAD_SPRINT = 46,    // reload while sprinting, a little slower (1, the default); 0: the sprint waits for the reload
+    CV_OPT_TACTICAL = 48,         // the smoke button's special grenade: 0 none, 1 flash, 2 stun, 3 smoke (ABI 10)
+    CV_OPT_LETHAL = 47,           // the frag button's: 0 frag, 1 Semtex, 2 C4, 3 Claymore, 4 throwing knife (ABI 10)
 };
 
 // Killstreak rewards (MW2's killstreakTable references); stage 1 implements UAV and EMP.
@@ -217,6 +219,7 @@ enum CvMw2Button : std::uint32_t {
     CV_MW2_JUMP = 0x400,
     CV_MW2_ADS = 0x800,
     CV_MW2_FRAG = 0x4000, // hold: pull the pin and cook; release: throw
+    CV_MW2_SMOKE = 0x8000, // MW2's smoke button: the special grenade (CV_OPT_TACTICAL)
     CV_MW2_LEAN_LEFT = 0x40,  // CODV's lean (held; CV_OPT_LEAN)
     CV_MW2_LEAN_RIGHT = 0x80,
 };
@@ -420,6 +423,18 @@ static_assert(sizeof(CvAudioStatus) == 120, "CvAudioStatus");
 // ---- thrown grenades (ABI 7) ----
 #define CV_GRENADE_FLYING 1u
 #define CV_GRENADE_EXPLODED 2u
+#define CV_GRENADE_LANDED 3u          // a C4 or a Claymore came to rest (once): the host's from now (ABI 10 addition)
+// CvGrenade.reserved: a Semtex stuck where it hit; bits 8..15 what it is.
+#define CV_GRENADE_STUCK 1u
+#define CV_GRENADE_KIND_MASK 0xFF00u
+#define CV_GRENADE_KIND_FRAG (1u << 8)
+#define CV_GRENADE_KIND_SEMTEX (2u << 8)
+#define CV_GRENADE_KIND_C4 (3u << 8)
+#define CV_GRENADE_KIND_CLAYMORE (4u << 8)
+#define CV_GRENADE_KIND_FLASH (5u << 8)       // the special grenades: no harm, the host's effect where they go off
+#define CV_GRENADE_KIND_STUN (6u << 8)
+#define CV_GRENADE_KIND_SMOKE (7u << 8)
+#define CV_GRENADE_KIND_KNIFE (8u << 8)       // the throwing knife: lands for the host (it kills whoever it struck)
 struct CvGrenade {
     std::uint32_t size;
     std::uint32_t id;
@@ -623,6 +638,47 @@ typedef std::uint32_t (*CvPlayAliasFn)(void*, const char*);
 // The host's own splash in MW2's killstreak splash (title, the line under it, the title's glow RGBA 0..1
 // or null for MW2's orange); 1 when queued, 0 without the import's HUD. Optional export (an ABI 10 addition).
 typedef std::uint32_t (*CvMw2SplashFn)(void*, const char* title, const char* description, const float* glow);
+// The host's own lines in MW2's HUD fonts (a game mode's wave and time), centred near the top: sent every
+// frame (lines not sent again for half a second are gone; 0 lines clears); 1 when MW2's HUD takes them.
+// Optional export (an ABI 10 addition).
+struct CvHudText {
+    char text[96];   // UTF-8, NUL-terminated
+    float y;         // virtual units (640 x 480) from the top; centred across
+    float scale;
+    float color[4];  // RGBA 0..1
+    float glow[4];   // under the letters; alpha 0: none
+    std::uint32_t font; // MW2's font: 9 the big title font, 10 the normal one
+    std::uint32_t reserved;
+};
+static_assert(sizeof(CvHudText) == 144 && offsetof(CvHudText, font) == 136, "CvHudText");
+typedef std::uint32_t (*CvMw2TextFn)(void*, const CvHudText* lines, std::uint32_t count);
+// A game mode's own count in the score bar's frame (the big number, its caption, the gold line under it, each
+// bar's share and row), sent every frame (gone when not sent again for half a second; null clears); 1 when
+// MW2's HUD takes it. Optional export (an ABI 10 addition).
+struct CvHudBoard {
+    std::uint32_t big;
+    char caption[16];
+    char under[32];
+    float top_share;
+    char top_row[32];
+    float bottom_share;
+    char bottom_row[32];
+    char title[32]; // over the bars: a title (a mode's state) and a line under it (empty: none)
+    char line[64];
+    std::uint32_t reserved;
+};
+static_assert(sizeof(CvHudBoard) == 224, "CvHudBoard");
+typedef std::uint32_t (*CvMw2ScorebarFn)(void*, const CvHudBoard* board);
+// A notice over the score bar's bars for `ms` (a title in the big font, a line under it or null); 0 when the
+// score bar does not show. Optional export (an ABI 10 addition).
+typedef std::uint32_t (*CvMw2BoardNoticeFn)(void*, const char* title, const char* line, std::uint32_t ms);
+// Optional exports (ABI 10): an imported MW2 alias looped at a level until its level is set to 0 (a
+// missile's flight, louder as it nears). cv_alias_loop returns the handle (0: none).
+typedef std::uint32_t (*CvAliasLoopFn)(void*, const char* alias, float level);
+typedef std::uint32_t (*CvAliasLevelFn)(void*, std::uint32_t handle, float level);
+// Diagnostics: what stops the MW2 player moving where the stick pushes it (forward, right; both 0: ahead):
+// the movers and the MW2 map (which of GTA's triangles), one line into `out`. Optional export (ABI 10 addition).
+typedef std::uint32_t (*CvMw2BlockedWhyFn)(void*, float forward, float right, char* out, std::uint32_t capacity);
 typedef std::uint32_t (*CvMw2WeaponNumbersFn)(const void*, const char*, CvWeaponNumbers*);
 typedef std::uint32_t (*CvMw2RefillFn)(void*);
 // ABI 10: the image file stems of the view models the player can hold next ("c:stem" colour maps,

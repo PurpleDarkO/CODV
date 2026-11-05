@@ -76,6 +76,12 @@ fn holdable(row: &table::Row) -> bool {
 /// MW2's default first-person arms (iw4L asset_model::fpv_catalog VIEWHANDS_NAME).
 pub const DEFAULT_HANDS: &str = "viewmodel_base_viewhands";
 
+/// MW2's equipment CODV throws from the frag button besides the frag (the Semtex, the C4, the Claymore):
+/// their view models and HUD icons are imported with the guns'.
+pub const EQUIPMENT: [&str; 4] = ["semtex_mp", "c4_mp", "claymore_mp", "throwingknife_mp"];
+/// MW2's special grenades on the smoke button (the flash, the stun, the smoke): imported with the guns' too.
+pub const TACTICALS: [&str; 3] = ["flash_grenade_mp", "concussion_grenade_mp", "smoke_grenade_mp"];
+
 /// What the viewmodel import wrote.
 #[derive(Debug, Default)]
 pub struct ViewmodelSummary {
@@ -135,10 +141,15 @@ pub fn import_viewmodels(
     let mut want_anims = BTreeSet::new();
     let mut want_images = BTreeSet::new();
     let mut summary = ViewmodelSummary { skipped_models: found.skipped.len(), ..Default::default() };
-    // Guns, and the thrown frag-class grenades (their throw animations).
-    for row in
-        table.weapons.iter_mut().filter(|r| is_holdable_gun(r) || (r.i("weap_type") == 1 && r.i("offhand_class") == 1))
-    {
+    // Guns, the thrown frag-class grenades, CODV's equipment on the frag button and the special grenades on
+    // the smoke button (their throw animations and HUD icons).
+    for row in table.weapons.iter_mut().filter(|r| {
+        is_holdable_gun(r)
+            || (r.i("weap_type") == 1
+                && (r.i("offhand_class") == 1
+                    || EQUIPMENT.contains(&r.name.as_str())
+                    || TACTICALS.contains(&r.name.as_str())))
+    }) {
         let Some(wm) = found.weapon_models.get(&row.name) else { continue };
         let hands = if wm.hands.is_empty() { DEFAULT_HANDS.to_owned() } else { wm.hands.clone() };
         row.strings.retain(|(k, _)| {

@@ -26,6 +26,16 @@ Mw2Primary=-1
 Mw2Secondary=-1
 AmmoScale=3
 Frags=2
+; Lethal: what G / RB throws, with MW2's animation and HUD icon (Frags is how many you carry).
+; 0 = MW2's frag (hold to cook), 1 = Semtex (sticks to what it hits, a car or a person too, and goes off 2 s
+; later), 2 = C4 (sticks where it lands; key 6 or a double tap of R sets them all off, from a vehicle too),
+; 3 = Claymore (put down ahead of you; it goes off when a hostile walks into its lasers), 4 = throwing knife
+; (one hit kills whoever it strikes; it stays stuck there a while).
+Lethal=0
+; Tactical: MW2's special grenade on T, with its animation and HUD icon, two carried. 0 = none, 1 = flashbang
+; (hostiles who see it cower, blinded; your screen goes white if you look at it), 2 = stun (shorter, greyer),
+; 3 = smoke (a cloud for a quarter of a minute, to get away in).
+Tactical=1
 ; JumpHeight: MW2's jump in IW4 units (MW2 = 39, about 1 m; 20..80). A little higher helps climbing.
 JumpHeight=45
 ; SprintTime: how long a sprint lasts in seconds, before the weapon's own scale (MW2 = 4; 1..16).
@@ -37,6 +47,9 @@ SprintRecharge=1.3
 GiveLoadout=1
 ; RecoilScale: multiplies every weapon's kick, 0.25 .. 2.
 RecoilScale=1
+; Damage: CODV's bullet damage on people. 0 = MW2's numbers, 1 = x1.5 (default), 2 = x2. GTA's people (armour,
+; limb hits) take more shots than MW2's players; vehicles and props always take MW2's damage.
+Damage=1
 ; FireMode: 0 = CODV bullets (CODV's timing, spread and range damage; GTA draws impacts and blood),
 ;           1 = GTA's own trigger at CODV's timing and aim point (GTA's damage and muzzle flash).
 FireMode=0
@@ -151,6 +164,12 @@ KillCounter=1
 ; KillFeedback: MW2's yellow "+100" over the crosshair and its bonus splashes (Headshot!, Longshot!,
 ; First Blood!, Double / Triple / Multi-Kill!) on hostile kills.
 Mw2Blood=1
+; ViewmodelLight: how the hands and gun are lit. 0 = fixed daylight, 1 = GTA's time of day,
+; 2 = the light around you (how bright the picture is behind the gun, with the time of day; default).
+ViewmodelLight=2
+; GunOverRadar: the hands and gun over GTA's minimap. 0 = drawn over it, 1 = a faint ghost under it (default),
+; 2 = hidden under it.
+GunOverRadar=1
 KillFeedback=1
 ; JumpSlowdown: MW2's slowdown when landing a jump (0: a landing keeps the speed).
 JumpSlowdown=0

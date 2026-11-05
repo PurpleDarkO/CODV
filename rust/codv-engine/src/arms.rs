@@ -83,10 +83,62 @@ pub struct Arsenal {
     offhand: Vec<(Gun, Throw)>,
 }
 
+/// MW2's equipment CODV puts on the frag button besides the frag (their rows are offhand class 5,
+/// "other"; CODV throws them through the frag's offhand flow, with their own animations).
+pub const EQUIPMENT: [&str; 4] = ["semtex_mp", "c4_mp", "claymore_mp", "throwingknife_mp"];
+/// MW2's special grenades on the smoke button (its tactical slot): the flash, the stun, the smoke (offhand
+/// classes 3 and 2: the second inventory row).
+pub const TACTICALS: [&str; 3] = ["flash_grenade_mp", "concussion_grenade_mp", "smoke_grenade_mp"];
+
+/// What a thrown offhand does once it meets something.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThrowKind {
+    /// Bounces and rolls until its fuse runs out (the frag).
+    #[default]
+    Frag,
+    /// Sticks where it first hits, its fuse starting then (the Semtex).
+    Sticky,
+    /// Sticks where it first hits and waits to be set off (the C4: the host's).
+    Charge,
+    /// Planted where it lands and waits for someone to walk in (the Claymore: the host's).
+    Mine,
+    /// Sticks in what it first hits (the throwing knife: the host kills whoever it hit).
+    Knife,
+    /// Bounces and goes off at its fuse without harm: the host blinds (the flash), dazes (the stun) or
+    /// fills the air with smoke.
+    Flash,
+    Stun,
+    Smoke,
+}
+
+impl ThrowKind {
+    pub fn of(name: &str) -> ThrowKind {
+        match name {
+            "semtex_mp" => ThrowKind::Sticky,
+            "c4_mp" => ThrowKind::Charge,
+            "claymore_mp" => ThrowKind::Mine,
+            "throwingknife_mp" => ThrowKind::Knife,
+            "flash_grenade_mp" => ThrowKind::Flash,
+            "concussion_grenade_mp" => ThrowKind::Stun,
+            "smoke_grenade_mp" => ThrowKind::Smoke,
+            _ => ThrowKind::Frag,
+        }
+    }
+    /// Sticks or lands on its first hit (the Semtex, the C4, the Claymore) instead of bouncing.
+    pub fn sticks(self) -> bool {
+        matches!(self, ThrowKind::Sticky | ThrowKind::Charge | ThrowKind::Mine | ThrowKind::Knife)
+    }
+    /// Lands and is the host's from then, never on a fuse (the C4, the Claymore, the throwing knife).
+    pub fn lands(self) -> bool {
+        matches!(self, ThrowKind::Charge | ThrowKind::Mine | ThrowKind::Knife)
+    }
+}
+
 /// How a thrown grenade flies and explodes (the weapon row's projectile and
 /// explosion fields; iw4L `EquipmentRuntimeFacts`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Throw {
+    pub kind: ThrowKind,
     /// MW2 offhandClass (1 frag).
     pub offhand_class: i32,
     pub hold_fire_time_ms: i32,
@@ -247,12 +299,16 @@ fn combat_facts(r: &Row, global: [f32; HITLOCS]) -> Result<WeaponCombatFacts, w:
 }
 
 fn throw_facts(r: &Row) -> Throw {
+    let kind = ThrowKind::of(&r.name);
     Throw {
-        offhand_class: r.i("offhand_class"),
+        kind,
+        // CODV's equipment goes through the frag's offhand flow (class 1); the frag and the special grenades
+        // keep theirs (the smoke button's are 2 and 3).
+        offhand_class: if kind.sticks() { 1 } else { r.i("offhand_class") },
         hold_fire_time_ms: r.i("hold_fire_time_ms"),
         fuse_time_ms: r.i("fuse_time_ms"),
-        // MW2's frag cooks (cookOffHold); the row does not carry the flag.
-        cook_off_hold: r.opt_b("cook_off_hold").unwrap_or(r.i("offhand_class") == 1),
+        // MW2's frag cooks (cookOffHold); the row does not carry the flag. The equipment never does.
+        cook_off_hold: kind == ThrowKind::Frag && r.opt_b("cook_off_hold").unwrap_or(r.i("offhand_class") == 1),
         speed: r.f("projectile_speed"),
         speed_up: r.f("projectile_speed_up"),
         speed_forward: r.f("projectile_speed_forward"),
@@ -272,8 +328,13 @@ impl Arsenal {
         let mut refused = Vec::new();
         let mut offhand = Vec::new();
         for r in &t.weapons {
-            // Thrown frag-class grenades (offhand class 1): the frag, semtex.
-            if r.i("weap_type") == w::WEAPTYPE_GRENADE && r.i("offhand_class") == 1 && r.i("fire_time_ms") > 0 {
+            // Thrown frag-class grenades (offhand class 1): the frag; and CODV's equipment (EQUIPMENT).
+            if r.i("weap_type") == w::WEAPTYPE_GRENADE
+                && (r.i("offhand_class") == 1
+                    || EQUIPMENT.contains(&r.name.as_str())
+                    || TACTICALS.contains(&r.name.as_str()))
+                && r.i("fire_time_ms") > 0
+            {
                 if let Ok(facts) = combat_facts(r, global) {
                     let gun = Gun {
                         name: r.name.clone(),
@@ -415,6 +476,8 @@ pub struct Gunner {
     /// The frag grenade carried (id, count), the offhand weapon in use and
     /// the fuse left while it is held (the weapon command's offhand state).
     frag: Option<(u32, i32)>,
+    /// The special grenade on the smoke button and how many (MW2's tactical: inventory row 1).
+    tactical: Option<(u32, i32)>,
     off_hand_index: i32,
     grenade_time_left: i32,
     /// Spare ammunition times this (CODV's AmmoScale; MW2 is 1).
@@ -459,6 +522,7 @@ impl Gunner {
         Gunner {
             hands,
             frag: None,
+            tactical: None,
             off_hand_index: 0,
             grenade_time_left: 0,
             reserve_scale: 1.0,
@@ -500,6 +564,17 @@ impl Gunner {
 
     pub fn frags(&self) -> i32 {
         self.frag.map_or(0, |f| f.1)
+    }
+
+    /// Carrying `count` of the special grenade `name` on MW2's smoke button (none: `count` 0 or not imported).
+    pub fn with_tacticals(mut self, arsenal: &Arsenal, name: &str, count: i32) -> Gunner {
+        self.tactical = arsenal.offhand_id(name).filter(|_| count > 0).map(|id| (id, count));
+        self
+    }
+
+    /// The special grenade carried and how many (0, 0: none).
+    pub fn tacticals(&self) -> (u32, i32) {
+        self.tactical.unwrap_or((0, 0))
     }
 
     pub fn loadout(&self) -> &[u32] {
@@ -701,11 +776,9 @@ impl Gunner {
         cmd.offhand.held_quick_drop_time_ms = facts.quick_drop_time_ms;
         cmd.offhand.off_hand_index = self.off_hand_index;
         cmd.offhand.grenade_time_left = self.grenade_time_left;
-        if let Some((id, count)) = self.frag
-            && let Some((g, t)) = arsenal.offhand(id)
-        {
-            cmd.offhand.offhand_primary = t.offhand_class;
-            cmd.offhand.inventory[0] = w::OffhandInvRow {
+        // The frag button's (row 0, offhand primary) and the smoke button's special grenade (row 1, secondary).
+        let row = |id: u32, count: i32| {
+            arsenal.offhand(id).map(|(g, t)| w::OffhandInvRow {
                 weapon: id,
                 offhand_class: t.offhand_class,
                 ammo: count,
@@ -719,7 +792,19 @@ impl Gunner {
                 has_detonator: false,
                 detonate_delay_ms: 0,
                 detonate_time_ms: 0,
-            };
+            })
+        };
+        if let Some((id, count)) = self.frag
+            && let Some(r) = row(id, count)
+        {
+            cmd.offhand.offhand_primary = r.offhand_class;
+            cmd.offhand.inventory[0] = r;
+        }
+        if let Some((id, count)) = self.tactical
+            && let Some(r) = row(id, count)
+        {
+            cmd.offhand.offhand_secondary = r.offhand_class;
+            cmd.offhand.inventory[1] = r;
         }
         let events = w::weapon_hands(&mut self.hands, &facts, &mut cmd, 0);
         self.off_hand_index = cmd.offhand.off_hand_index;
@@ -728,6 +813,9 @@ impl Gunner {
         ps.off_hand_index = self.off_hand_index;
         ps.grenade_time_left = self.grenade_time_left;
         if let Some((id, count)) = self.frag.as_mut() {
+            *count = cmd.offhand.inventory.iter().find(|r| r.weapon == *id).map_or(*count, |r| r.ammo);
+        }
+        if let Some((id, count)) = self.tactical.as_mut() {
             *count = cmd.offhand.inventory.iter().find(|r| r.weapon == *id).map_or(*count, |r| r.ammo);
         }
         out.offhand_view = (cmd.weap_flags & playerstate_iw4::weap_flags::OFFHAND_VIEW != 0 && self.off_hand_index > 0)

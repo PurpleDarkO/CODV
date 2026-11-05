@@ -467,6 +467,9 @@ void Units::TickNuke(RuntimeBridge& runtime, Ped player, CvStreakView& view) {
                               "NEUTRAL", "SNOW", "BLIZZARD", "SNOWLIGHT", "XMAS"})
             if (util::Joaat(w) == before) after_.weather = w;
         Call<void>(gta::SET_WEATHER_TYPE_OVERTIME_PERSIST, "HALLOWEEN", 2.0f);
+        // The police the blast killed are not replaced for a good while: a chance to get away.
+        graceUntil_ = ksworld::Now() + ksrules::kNukePoliceGraceMs;
+        Grace(true);
     }
     // The flash: white, then a burnt orange that fades (mpnuke / mpnuke_aftermath vision sets).
     const float since = static_cast<float>(t - ksrules::kNukeMs) / 1000.0f;
@@ -569,7 +572,19 @@ void Units::EndAftermath() {
     after_ = Aftermath{};
 }
 
+// GTA's police dispatch services: cars, helicopters, SWAT (cars and helicopters), riders, requested
+// vehicles, roadblocks, boats, the army.
+void Units::Grace(bool on) {
+    if (grace_ == on) return;
+    grace_ = on;
+    for (const int type : {1, 2, 4, 6, 7, 8, 12, 13, 14}) Call<void>(gta::ENABLE_DISPATCH_SERVICE, type, on ? FALSE : TRUE);
+    Call<void>(gta::SET_CREATE_RANDOM_COPS, on ? FALSE : TRUE);
+    if (on) util::Logf(log_, "CODV: after the nuke no police are sent for %u s", ksrules::kNukePoliceGraceMs / 1000);
+    else util::Logf(log_, "CODV: the police are sent again");
+}
+
 void Units::Tick(RuntimeBridge& runtime, Ped player, CvStreakView& view, std::uint32_t& give) {
+    if (grace_ && static_cast<int>(ksworld::Now() - graceUntil_) >= 0) Grace(false);
     TickHeli(player);
     TickSentry(runtime, player);
     TickCrate(runtime, player, view, give);
@@ -588,6 +603,7 @@ void Units::Stop() {
     if (nuke_.on) Call<void>(gta::SET_TIME_SCALE, 1.0f);
     nuke_ = NukeState{};
     EndAftermath();
+    Grace(false);
 }
 
 } // namespace ksunits

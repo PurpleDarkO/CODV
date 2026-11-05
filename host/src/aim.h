@@ -100,4 +100,13 @@ inline int HitLocation(const Vec& hit, const Vec (&j)[kJointCount]) {
     return best;
 }
 
+// A CODV missile's flight sound at `metres` from the player: full within kLoopNear, then falling off with
+// the distance (about a quarter at 100 m, a tenth at 250 m), never quite silent while it flies.
+inline constexpr float kLoopNear = 25.0f;
+inline float MissileLoopLevel(float metres) {
+    const float d = metres > kLoopNear ? metres : kLoopNear;
+    const float l = kLoopNear / d;
+    return l > 0.02f ? l : 0.02f;
+}
+
 } // namespace aim

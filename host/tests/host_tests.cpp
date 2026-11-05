@@ -16,6 +16,9 @@
 #include "menu.h"
 #include "surface_map.h"
 #include "juggernaut_rules.h"
+#include "equipment_rules.h"
+#include "tactical_rules.h"
+#include "radar_box.h"
 #include "mw2_input.h"
 #include "pad.h"
 
@@ -83,6 +86,7 @@ static void ControlPolicy() {
     CHECK(Has(s, input::kAim) && Has(s, input::kAttack) && Has(s, controls::kNextCamera) && Has(s, 23));
     CHECK(Has(s, input::kThrowGrenade) && Has(s, controls::kCover)); // G and RB are MW2's frag
     for (int c : input::kSlotKeys) CHECK(Has(s, c)); // keys 1 / 2 / 3 / 5 are CODV's slots
+    CHECK(Has(s, input::kEquipmentKey) && Has(s, input::kTacticalKey)); // 6: the C4's detonator, T: the special grenade
     CHECK(Has(s, ksrules::kActionSlotKey) && !Has(s, ksrules::kContext)); // 4 is action slot 4
     f.rewardHeld = true; // a killstreak waits: the D-pad's right (GTA's context) calls it in
     CHECK(Has(controls::Suppressed(f), ksrules::kContext));
@@ -140,6 +144,10 @@ static void KillstreakRules() {
 }
 
 static void AimMath() {
+    // A missile's flight sound: full near the player, fading with the distance, never 0 (0 stops it).
+    CHECK(Near(aim::MissileLoopLevel(0.0f), 1.0f) && Near(aim::MissileLoopLevel(25.0f), 1.0f));
+    CHECK(Near(aim::MissileLoopLevel(100.0f), 0.25f) && aim::MissileLoopLevel(250.0f) < aim::MissileLoopLevel(100.0f));
+    CHECK(aim::MissileLoopLevel(3000.0f) > 0.0f);
     // Heading 0 looks along +Y; 90 looks along -X (headings grow to the left).
     aim::Vec d = aim::Direction(0.0f, 0.0f);
     CHECK(Near(d.x, 0.0f) && Near(d.y, 1.0f) && Near(d.z, 0.0f));
@@ -278,6 +286,9 @@ static void Mw2Input() {
     Raw fr;
     fr.frag = true;
     CHECK(frame(fr).buttons == CV_MW2_FRAG);
+    Raw sm;
+    sm.smoke = true;
+    CHECK(frame(sm).buttons == CV_MW2_SMOKE); // T: MW2's smoke button (the special grenade)
     // Number keys: 1 primary, 2 secondary, 3 sniper, 5 launcher (loadout slots 0..3).
     const std::uint32_t want[5] = {0u, 2u, 3u, 4u, 5u};
     for (int k = 1; k <= 4; ++k) {
@@ -414,8 +425,13 @@ static void Mw2Input() {
     CHECK(Near(mw2input::LensFov(65.0f, 0.0f, 1.0f), 65.0f));
     // View model light: full at noon, dim at midnight, softer indoors.
     const mw2input::Light noon = mw2input::ViewmodelLight(12, 0, false), night = mw2input::ViewmodelLight(0, 30, false);
-    CHECK(Near(noon.key, 1.0f) && night.key < 0.4f && mw2input::ViewmodelLight(6, 0, false).key > night.key);
+    CHECK(Near(noon.key, 1.0f) && night.key < 0.2f && mw2input::ViewmodelLight(6, 0, false).key > night.key);
     CHECK(mw2input::ViewmodelLight(12, 0, true).key < noon.key);
+    // The frame behind the gun: a dark street darkens it, a bright one keeps it lit; unmeasured: the clock's.
+    CHECK(Near(mw2input::SceneLight(noon, -1.0f).key, noon.key));
+    CHECK(mw2input::SceneLight(noon, 0.03f).key < 0.25f && mw2input::SceneLight(noon, 0.45f).key > 0.9f);
+    CHECK(mw2input::SceneLight(noon, 0.1f).key < 0.35f); // a night street: far darker on screen too
+    CHECK(mw2input::SceneLight(night, 0.4f).key > night.key && mw2input::SceneLight(night, 0.4f).ambient > night.ambient);
     // MW2's cg_fov 65 is about 51.1 degrees vertical.
     CHECK(std::fabs(mw2input::VerticalFov(65.0f) - 51.07f) < 0.05f);
 }
@@ -510,6 +526,8 @@ static void JuggernautRules() {
     using namespace jugg;
     CHECK(MaxAlive(3) == 0 && MaxAlive(4) == 1 && MaxAlive(5) == 3 && MaxAlive(5) == kMaxJuggernauts);
     CHECK(AfterDeathMs(0.0f) == 45000 && AfterDeathMs(0.5f) == 75000 && AfterDeathMs(0.99f) == 105000);
+    CHECK(AfterSpawnMs(0.0f) == 90000 && AfterSpawnMs(0.5f) == 120000 && AfterSpawnMs(0.99f) == 150000);
+    CHECK(AfterSpawnMs(0.0f) > AfterDeathMs(0.0f)); // a second one never comes as soon as a replacement
     CHECK(Chance(3) == 0.0f && Chance(4) > 0.0f && Chance(5) > Chance(4) && Chance(5) < 1.0f);
     CHECK(kHealth > 1000 && kArmour > 0 && kMoveRate < 1.0f);
     CHECK(kAccuracy > 0 && kAccuracy < 20 && kShootRate > 0 && kShootRate < 100); // a threat, not a marksman
@@ -523,7 +541,54 @@ static void JuggernautRules() {
     CHECK(Near(heading, 90.0f, 0.01f) && Near(pitch, 45.0f, 0.01f));
 }
 
+static void EquipmentRules() {
+    using namespace equip;
+    CHECK(kFrag == 0 && kSemtex == 1 && kC4 == 2 && kClaymore == 3 && kThrowingKnife == 4); // CV_OPT_LETHAL's values
+    // The throwing knife strikes whoever stands where it landed (not a step away, not a floor above).
+    const float struck[3] = {0.0f, 0.0f, 1.2f}, ped[3] = {0.4f, 0.2f, 1.0f}, aside[3] = {1.5f, 0.0f, 1.0f};
+    const float upstairs[3] = {0.0f, 0.0f, 4.0f};
+    CHECK(KnifeStruck(struck, ped) && !KnifeStruck(struck, aside) && !KnifeStruck(struck, upstairs));
+    CHECK(Near(kRadius, 6.5024f, 0.01f) && kMaxPlaced >= 2);
+    CHECK(DoubleTap(200) && !DoubleTap(0) && !DoubleTap(kDoubleTapMs + 1));
+    // A Claymore facing north (heading 0) sees ahead, not behind, beside, too far or high above.
+    const float at[3] = {0.0f, 0.0f, 0.0f};
+    const float ahead[3] = {0.3f, 3.0f, 0.5f}, behind[3] = {0.0f, -2.0f, 0.0f}, side[3] = {3.0f, 0.5f, 0.0f};
+    const float distant[3] = {0.0f, 6.0f, 0.0f}, above[3] = {0.0f, 2.0f, 4.0f};
+    CHECK(InCone(at, 0.0f, ahead) && !InCone(at, 0.0f, behind) && !InCone(at, 0.0f, side));
+    CHECK(!InCone(at, 0.0f, distant) && !InCone(at, 0.0f, above));
+    const float west[3] = {-3.0f, 0.0f, 0.0f}; // GTA headings grow to the left: 90 faces west
+    CHECK(InCone(at, 90.0f, west) && !InCone(at, 0.0f, west));
+}
+
+static void TacticalRules() {
+    using namespace tactical;
+    CHECK(kFlash == 1 && kStun == 2 && kSmoke == 3); // CV_OPT_TACTICAL's values
+    CHECK(Near(kFlashRange, 20.32f, 0.01f) && kStunRange < kFlashRange);
+    // Hostiles cower longer near the bang; a stun is briefer than a flash.
+    CHECK(CowerMs(0.0f, false) == kFlashBlindMaxMs && CowerMs(kFlashRange, false) == kFlashBlindMinMs);
+    CHECK(CowerMs(2.0f, true) < CowerMs(2.0f, false));
+    // The player: near and looking at it is the whole of it, looking away a part.
+    CHECK(Near(PlayerAmount(0.0f, kFlashRange, 1.0f), 1.0f) && PlayerAmount(0.0f, kFlashRange, -1.0f) < 0.5f);
+    CHECK(Near(PlayerAmount(kFlashRange, kFlashRange, 1.0f), 0.0f));
+    // The white holds, then fades away.
+    CHECK(Near(Whiteness(1.0f, 100), 1.0f) && Whiteness(1.0f, kFlashHoldMaxMs + kFadeMs / 2) < 1.0f);
+    CHECK(Whiteness(1.0f, kFlashHoldMaxMs + kFadeMs + 1) == 0.0f && Whiteness(0.0f, 10) == 0.0f);
+}
+
+static void RadarBox() {
+    // 16:9, the default safe zone: the radar's box in the bottom left, about a seventh wide, a fifth high.
+    float b[4];
+    radarbox::Box(1.0f, 16.0f / 9.0f, b);
+    CHECK(b[0] == 0.0f && b[3] == 1.0f && Near(b[2], 0.1406f + radarbox::kPad, 0.002f) && Near(b[1], 1.0f - 0.1762f - radarbox::kPad, 0.002f));
+    float s[4];
+    radarbox::Box(0.9f, 16.0f / 9.0f, s); // a smaller safe zone moves it in from the corner
+    CHECK(s[2] > b[2] && s[1] < b[1]);
+}
+
 int main() {
+    RadarBox();
+    TacticalRules();
+    EquipmentRules();
     InputMap();
     ControlPolicy();
     KillstreakRules();

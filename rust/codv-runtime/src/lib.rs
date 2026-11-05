@@ -155,6 +155,17 @@ pub const CV_OPT_WEAPON_SETS: u32 = 45;
 /// CODV's reload while sprinting (1, the default): a sprint no longer waits for the reload, which goes
 /// on at a slightly slower sprint; 0: the sprint starts once the reload ends (CODV 0.1.0).
 pub const CV_OPT_RELOAD_SPRINT: u32 = 46;
+/// What the frag button throws (arms::LETHALS): 0 MW2's frag, 1 the Semtex, 2 the C4, 3 the Claymore, 4 the
+/// throwing knife (it lands for the host, CV_GRENADE_LANDED, which kills whoever it struck), each
+/// with its own MW2 animation and HUD icon (the setup imports them; an older import has none: the throw
+/// shows no hand). The C4 and the Claymore are the host's once they land (CV_GRENADE_LANDED). An addition
+/// to ABI 10.
+pub const CV_OPT_LETHAL: u32 = 47;
+/// MW2's special grenade on the smoke button (the host's CV_MW2_SMOKE): 0 none, 1 the flash, 2 the stun,
+/// 3 the smoke, two carried (arms::TACTICAL_COUNT), with its MW2 animation and HUD icon. They bounce and go
+/// off at their fuse unharmed (CV_GRENADE_KIND_FLASH .. SMOKE): the host makes their effect. An addition to
+/// ABI 10.
+pub const CV_OPT_TACTICAL: u32 = 48;
 /// CODV's sprint refill (30% faster than MW2's: the meter was rarely full again).
 const SPRINT_RECHARGE: f32 = 1.3;
 /// CODV's default sprint speed scale: a little over MW2's 1.5.
@@ -850,6 +861,27 @@ pub unsafe extern "C" fn cv_set_option(rt: *mut c_void, id: u32, value: f32) -> 
             CV_OPT_SLIDE => inner.slide = value != 0.0,
             CV_OPT_JUMP_SLOWDOWN => inner.jump_slowdown = value != 0.0,
             CV_OPT_RELOAD_SPRINT => inner.reload_sprint = value != 0.0,
+            CV_OPT_TACTICAL => {
+                let Some(arms) = inner.arms.as_mut() else { return 0 };
+                if !value.is_finite() || value < 0.0 || !arms.set_tactical(value as usize) {
+                    (rt.log)(&format!("mw2: special grenade {value}: not imported"));
+                    return 0;
+                }
+                (rt.log)(&format!(
+                    "mw2: special grenade {}",
+                    if arms.tactical == 0 { "none" } else { arms.tactical_name() }
+                ));
+                prewarm(&inner, &rt.audio);
+            }
+            CV_OPT_LETHAL => {
+                let Some(arms) = inner.arms.as_mut() else { return 0 };
+                if !value.is_finite() || value < 0.0 || !arms.set_lethal(value as usize) {
+                    (rt.log)(&format!("mw2: lethal {value}: not imported (the frag stays)"));
+                    return 0;
+                }
+                (rt.log)(&format!("mw2: lethal {}", arms.lethal_name()));
+                prewarm(&inner, &rt.audio);
+            }
             CV_OPT_AUTO_VAULT => inner.auto_vault = value != 0.0,
             CV_OPT_HIGH_CLIMB => inner.high_climb = value != 0.0,
             CV_OPT_DIVE => inner.dive = value != 0.0,
@@ -1200,6 +1232,9 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
                 gone.push(e);
             }
         }
+        // A C4 or a Claymore at rest is the host's from here (reported once, then dropped).
+        let landed: Vec<codv_engine::grenade::Grenade> = inner.grenades.iter().filter(|g| g.landed).cloned().collect();
+        inner.grenades.retain(|g| !g.landed);
         let (before, hull) = (st.player.peek().origin, st.player.hull_maxs());
         *out = mw2::step(st, input, &worlds);
         drop(worlds);
@@ -1246,8 +1281,18 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
             }
         }
         for e in gone {
+            let kind = inner.grenades.iter().find(|g| g.id == e.id).map_or(CV_GRENADE_KIND_FRAG, grenade_kind);
             inner.grenades.retain(|g| g.id != e.id);
-            inner.explosions.push(grenade_report(st.frame, &e, CV_GRENADE_EXPLODED));
+            let mut r = grenade_report(st.frame, &e, CV_GRENADE_EXPLODED);
+            r.reserved = kind;
+            inner.explosions.push(r);
+        }
+        for mut g in landed {
+            g.shift(shift);
+            let mut r = grenade_report(st.frame, &g.explosion(), CV_GRENADE_LANDED);
+            r.rotation = [0.0, 0.0, g.angles[2]];
+            r.reserved = grenade_kind(&g);
+            inner.explosions.push(r);
         }
         if let Some(arms) = inner.arms.as_mut() {
             // A sprint over aim: the weapon is not aiming either.
@@ -1287,6 +1332,10 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
                     inner.next_grenade = inner.next_grenade.wrapping_add(1).max(1);
                     let g =
                         codv_engine::grenade::Grenade::thrown(id, weapon, *t, eye, ps.viewangles, ps.velocity, fuse);
+                    if t.kind != codv_engine::arms::ThrowKind::Frag {
+                        let name = arms.arsenal.any(weapon).map_or("?", |g| g.name.as_str());
+                        (rt.log)(&format!("mw2: {name} thrown ({:?}, {:.0} units/s)", t.kind, t.speed));
+                    }
                     inner.grenades.push(g);
                 }
                 if let Some(weapon) = frame.cooked_off
@@ -1916,6 +1965,20 @@ pub const CV_WEAPON_REQUEST_KNIFE: u32 = arms::REQUEST_KNIFE;
 pub const CV_WEAPON_REQUEST_GRENADE: u32 = arms::REQUEST_GRENADE;
 pub const CV_GRENADE_FLYING: u32 = 1;
 pub const CV_GRENADE_EXPLODED: u32 = 2;
+/// A C4 or a Claymore came to rest (once): the host takes it over (it never goes off in the runtime).
+/// An addition to ABI 10 (an older host sees one more frame of a model).
+pub const CV_GRENADE_LANDED: u32 = 3;
+/// CvGrenade.reserved: a Semtex stuck where it hit (on a car or a person the host may carry it along).
+pub const CV_GRENADE_STUCK: u32 = 1;
+/// CvGrenade.reserved bits 8..15: what it is (CV_GRENADE_KIND_*).
+pub const CV_GRENADE_KIND_FRAG: u32 = 1 << 8;
+pub const CV_GRENADE_KIND_SEMTEX: u32 = 2 << 8;
+pub const CV_GRENADE_KIND_C4: u32 = 3 << 8;
+pub const CV_GRENADE_KIND_CLAYMORE: u32 = 4 << 8;
+pub const CV_GRENADE_KIND_FLASH: u32 = 5 << 8;
+pub const CV_GRENADE_KIND_STUN: u32 = 6 << 8;
+pub const CV_GRENADE_KIND_SMOKE: u32 = 7 << 8;
+pub const CV_GRENADE_KIND_KNIFE: u32 = 8 << 8;
 
 /// A thrown grenade: in flight (move the host's model there) or gone off
 /// (once: the host makes the explosion; GTA deals its damage).
@@ -1933,6 +1996,22 @@ pub struct CvGrenade {
     /// Explosion radius, metres.
     pub radius: f32,
     pub reserved: u32,
+}
+
+/// CvGrenade.reserved's kind (and stuck) bits for `g`.
+fn grenade_kind(g: &codv_engine::grenade::Grenade) -> u32 {
+    use codv_engine::arms::ThrowKind;
+    let kind = match g.throw.kind {
+        ThrowKind::Frag => CV_GRENADE_KIND_FRAG,
+        ThrowKind::Sticky => CV_GRENADE_KIND_SEMTEX,
+        ThrowKind::Charge => CV_GRENADE_KIND_C4,
+        ThrowKind::Mine => CV_GRENADE_KIND_CLAYMORE,
+        ThrowKind::Flash => CV_GRENADE_KIND_FLASH,
+        ThrowKind::Stun => CV_GRENADE_KIND_STUN,
+        ThrowKind::Smoke => CV_GRENADE_KIND_SMOKE,
+        ThrowKind::Knife => CV_GRENADE_KIND_KNIFE,
+    };
+    kind | if g.stuck { CV_GRENADE_STUCK } else { 0 }
 }
 
 fn grenade_report(frame: [f64; 2], e: &codv_engine::grenade::Explosion, state: u32) -> CvGrenade {
@@ -2005,6 +2084,7 @@ pub unsafe extern "C" fn cv_mw2_grenades(rt: *mut c_void, out: *mut CvGrenade, c
         for e in explosions.into_iter().chain(inner.grenades.iter().map(|g| {
             let mut r = grenade_report(frame, &g.explosion(), CV_GRENADE_FLYING);
             r.rotation = g.angles;
+            r.reserved = grenade_kind(g);
             r
         })) {
             if n == out.len() {
@@ -2177,10 +2257,18 @@ pub unsafe extern "C" fn cv_mw2_hud_draw(
         let frame = &arms.latest;
         let frag_icon = arms
             .arsenal
-            .offhand_id(arms::FRAG)
+            .offhand_id(arms.lethal_name())
             .and_then(|id| arms.row(id))
             .map_or(String::new(), |r| r.s("hud_icon_image").to_owned());
-        let weapon = mw2hud::Weapon { frame: Some(frame), row: arms.row(frame.weapon), frag_icon };
+        let (tactical_id, tactical_count) = arms.gunner.as_ref().map_or((0, 0), |g| g.tacticals());
+        let tactical_icon = arms.row(tactical_id).map_or(String::new(), |r| r.s("hud_icon_image").to_owned());
+        let weapon = mw2hud::Weapon {
+            frame: Some(frame),
+            row: arms.row(frame.weapon),
+            frag_icon,
+            tactical_icon,
+            tacticals: tactical_count,
+        };
         let javelin = inner.javelin_ads.then_some(mw2hud::Clu {
             too_close: input.lock & CV_HUD_LOCK_TOO_CLOSE != 0,
             lock: match input.lock & 3 {
@@ -2643,6 +2731,34 @@ pub unsafe extern "C" fn cv_play_alias(rt: *mut c_void, alias: *const c_char) ->
     })
 }
 
+/// Starts an imported MW2 sound alias looped, at `level` (1: the alias's own volume), until
+/// `cv_alias_level` sets it to 0 (a missile's flight). Returns its handle (0: not imported, or MW2's
+/// audio is off). An addition to ABI 10 (optional export).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_alias_loop(rt: *mut c_void, alias: *const c_char, level: f32) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        if alias.is_null() || !level.is_finite() {
+            return 0;
+        }
+        let name = unsafe { CStr::from_ptr(alias) }.to_string_lossy().to_ascii_lowercase();
+        let Ok(mut a) = rt.audio.lock() else { return 0 };
+        a.as_mut().map_or(0, |a| a.play_loop(&name, level))
+    })
+}
+
+/// A loop's level (`cv_alias_loop`'s handle; 0 or less stops it). Returns the voices it reached
+/// (0: the loop is gone). An addition to ABI 10 (optional export).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_alias_level(rt: *mut c_void, handle: u32, level: f32) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        let level = if level.is_finite() { level } else { 0.0 };
+        let Ok(mut a) = rt.audio.lock() else { return 0 };
+        a.as_mut().map_or(0, |a| a.level(handle, level) as u32)
+    })
+}
+
 /// The host's own splash in MW2's killstreak splash (a Juggernaut's entrance): `title` (UTF-8, shown
 /// as given) with its glow `glow` (RGBA 0..1; null: MW2's orange) and `description` under it (may be
 /// null). Returns 1 when queued, 0 without the import's HUD. An addition to ABI 10 (optional export).
@@ -2672,6 +2788,236 @@ pub unsafe extern "C" fn cv_mw2_splash(
         };
         let Ok(mut lock) = rt.inner.lock() else { return 0 };
         lock.mw2hud.as_mut().map_or(0, |h| h.custom_splash(&title, &description, glow) as u32)
+    })
+}
+
+/// Diagnostics: what stops the MW2 player moving where the host pushes it (`forward`, `right`: the stick,
+/// any scale; both 0: straight ahead). A sweep of the player's hull 0.8 m that way against the movers (a
+/// vehicle, a ped, an object: which) and against the MW2 map (how far, how steep, which of GTA's triangles:
+/// its material, a gap filler, vegetation, how high), and the same sweep a step higher. One line into `out`.
+/// Optional export (the host resolves it by name).
+///
+/// # Safety
+/// `out` points at `capacity` writable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_mw2_blocked_why(
+    rt: *mut c_void,
+    forward: f32,
+    right: f32,
+    out: *mut c_char,
+    capacity: u32,
+) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        if out.is_null() || capacity < 2 {
+            return 0;
+        }
+        let Ok(lock) = rt.inner.lock() else { return 0 };
+        let inner = &*lock;
+        let Some(st) = inner.mw2.as_ref() else { return 0 };
+        use codv_engine::player::{PLAYER_MINS, PLAYER_TRACE_MASK};
+        const REACH: f32 = 32.0;
+        const STEP: f32 = 18.0;
+        let p = st.player.peek();
+        let hull = st.player.hull_maxs();
+        let yaw = p.view_angles[1].to_radians();
+        let (f, r) = (if forward.is_finite() { forward } else { 0.0 }, if right.is_finite() { right } else { 0.0 });
+        let d = [yaw.cos() * f + yaw.sin() * r, yaw.sin() * f - yaw.cos() * r];
+        let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+        let d = if len < 1e-3 { [yaw.cos(), yaw.sin()] } else { [d[0] / len, d[1] / len] };
+        let s = p.origin;
+        let e = [s[0] + d[0] * REACH, s[1] + d[1] * REACH, s[2]];
+        let at = st.position();
+        let m = METRES_PER_UNIT;
+        let mut parts = Vec::new();
+        let movers = movers::MoverView { bodies: inner.movers.bodies(), frame: st.frame };
+        let (tm, entity) = movers.trace_entity(s, e, PLAYER_MINS, hull, PLAYER_TRACE_MASK);
+        if entity != 0 && (tm.fraction < 1.0 || tm.startsolid != 0) {
+            let body = inner.movers.bodies().iter().find(|b| b.entity == entity);
+            let kind = body.map_or(9, |b| b.kind);
+            let kind = ["vehicle", "ped", "object"].get(kind as usize).copied().unwrap_or("mover");
+            parts.push(format!(
+                "{kind} entity {entity} at {:.2} m{} ({})",
+                tm.fraction * REACH * m,
+                if tm.startsolid != 0 { " (inside it)" } else { "" },
+                body.map_or_else(String::new, |b| b.describe())
+            ));
+        }
+        match rt.collision.area().filter(|a| a.covers([at[0], at[1]])) {
+            None => parts.push("no MW2 map built here".into()),
+            Some(a) => {
+                let view = collision::AreaView::new(&a, st.frame);
+                let t = view.trace(s, e, PLAYER_MINS, hull, PLAYER_TRACE_MASK);
+                if t.fraction < 1.0 || t.startsolid != 0 {
+                    let slope = t.normal[2].abs().clamp(0.0, 1.0).acos().to_degrees();
+                    let k = t.fraction * REACH + 2.0;
+                    let what =
+                        view.overlaps([s[0] + d[0] * k, s[1] + d[1] * k, s[2]], PLAYER_MINS, hull, PLAYER_TRACE_MASK);
+                    let up = view.trace(
+                        [s[0], s[1], s[2] + STEP],
+                        [e[0], e[1], e[2] + STEP],
+                        PLAYER_MINS,
+                        hull,
+                        PLAYER_TRACE_MASK,
+                    );
+                    parts.push(format!(
+                        "map at {:.2} m{}, slope {:.0} deg [{}]; a step higher: {}",
+                        t.fraction * REACH * m,
+                        if t.startsolid != 0 { " (inside it)" } else { "" },
+                        slope,
+                        if what.is_empty() { "no triangle named".to_owned() } else { what.join("; ") },
+                        if up.fraction >= 1.0 && up.startsolid == 0 { "clear" } else { "blocked too" }
+                    ));
+                }
+            }
+        }
+        if parts.is_empty() {
+            parts.push(format!(
+                "nothing within {:.2} m (the stop is not collision: the input, a mantle, the speed)",
+                REACH * m
+            ));
+        }
+        let dst = unsafe { std::slice::from_raw_parts_mut(out.cast::<u8>(), capacity as usize) };
+        copy_str(dst, &format!("MW2 ahead: {}", parts.join(" | ")));
+        1
+    })
+}
+
+/// A game mode's own count for the score bar (cv_mw2_scorebar).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CvHudBoard {
+    /// The big number in the icon square, its caption under it, the small gold line under that (UTF-8).
+    pub big: u32,
+    pub caption: [u8; 16],
+    pub under: [u8; 32],
+    /// Each bar's share (0..1) and its row of text beside the bars (UTF-8).
+    pub top_share: f32,
+    pub top_row: [u8; 32],
+    pub bottom_share: f32,
+    pub bottom_row: [u8; 32],
+    /// Over the bars: a title and a line under it (UTF-8; empty: none).
+    pub title: [u8; 32],
+    pub line: [u8; 64],
+    pub reserved: u32,
+}
+
+const _: () = assert!(size_of::<CvHudBoard>() == 224);
+
+/// A game mode's own count in the score bar's frame, for the frames to come: sent every frame (gone when not
+/// sent again for half a second; null clears): the score bar shows it, whether CODV's count shows or not.
+/// Optional export (the host resolves it by name); 1 when MW2's HUD takes it.
+///
+/// # Safety
+/// `board` is null or points at a CvHudBoard.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_mw2_scorebar(rt: *mut c_void, board: *const CvHudBoard) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        let text = |b: &[u8]| CStr::from_bytes_until_nul(b).ok().and_then(|c| c.to_str().ok()).unwrap_or("").to_owned();
+        let share = |v: f32| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+        let board = unsafe { board.as_ref() }.map(|b| mw2hud::HostBoard {
+            big: b.big,
+            caption: text(&b.caption),
+            under: text(&b.under),
+            top_share: share(b.top_share),
+            top_row: text(&b.top_row),
+            bottom_share: share(b.bottom_share),
+            bottom_row: text(&b.bottom_row),
+            title: text(&b.title),
+            line: text(&b.line),
+        });
+        let Ok(mut lock) = rt.inner.lock() else { return 0 };
+        lock.mw2hud.as_mut().map_or(0, |h| {
+            h.set_host_board(board);
+            1
+        })
+    })
+}
+
+/// A notice over the score bar's bars for `ms` milliseconds (a Juggernaut down): `title` in the big font,
+/// `line` under it (null: none). 0 when the score bar does not show (the host says it another way).
+/// Optional export (the host resolves it by name).
+///
+/// # Safety
+/// `title` is a NUL-terminated string; `line` is one or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_mw2_board_notice(
+    rt: *mut c_void,
+    title: *const c_char,
+    line: *const c_char,
+    ms: u32,
+) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        if title.is_null() {
+            return 0;
+        }
+        let title = unsafe { CStr::from_ptr(title) }.to_string_lossy().into_owned();
+        let line =
+            if line.is_null() { String::new() } else { unsafe { CStr::from_ptr(line) }.to_string_lossy().into_owned() };
+        let Ok(mut lock) = rt.inner.lock() else { return 0 };
+        lock.mw2hud.as_mut().map_or(0, |h| h.board_notice(&title, &line, ms.min(15000) as i32) as u32)
+    })
+}
+
+/// One of the host's lines in MW2's HUD fonts (cv_mw2_text).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CvHudText {
+    /// UTF-8, NUL-terminated.
+    pub text: [u8; 96],
+    /// Virtual units (640 x 480) from the top; centred across.
+    pub y: f32,
+    pub scale: f32,
+    pub color: [f32; 4],
+    /// Under the letters; alpha 0: none.
+    pub glow: [f32; 4],
+    /// MW2's font: 9 the big title font, 10 the normal one.
+    pub font: u32,
+    pub reserved: u32,
+}
+
+const _: () = assert!(size_of::<CvHudText>() == 144);
+
+/// The host's own lines (a game mode's wave and time) in MW2's HUD fonts, centred near the top, for the
+/// frames to come: sent every frame (lines not sent again for half a second are gone; 0 lines clears).
+/// Optional export (the host resolves it by name); 1 when MW2's HUD takes them.
+///
+/// # Safety
+/// `lines` points at `count` CvHudText (or is null with `count` 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_mw2_text(rt: *mut c_void, lines: *const CvHudText, count: u32) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        let list = if lines.is_null() || count == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(lines, count.min(16) as usize) }
+        };
+        let finite = |v: f32, d: f32| if v.is_finite() { v } else { d };
+        let lines: Vec<mw2hud::HostLine> = list
+            .iter()
+            .map(|l| {
+                let text =
+                    CStr::from_bytes_until_nul(&l.text).ok().and_then(|c| c.to_str().ok()).unwrap_or("").to_owned();
+                let color = l.color.map(|c| finite(c, 1.0).clamp(0.0, 1.0));
+                let glow = l.glow.map(|c| finite(c, 0.0).clamp(0.0, 1.0));
+                mw2hud::HostLine {
+                    text,
+                    y: finite(l.y, 20.0).clamp(-480.0, 960.0),
+                    scale: finite(l.scale, 0.3).clamp(0.05, 2.0),
+                    font: if l.font == 9 { 9 } else { 10 },
+                    color,
+                    glow: (glow[3] > 0.0).then_some(glow),
+                }
+            })
+            .collect();
+        let Ok(mut lock) = rt.inner.lock() else { return 0 };
+        lock.mw2hud.as_mut().map_or(0, |h| {
+            h.set_host_text(lines);
+            1
+        })
     })
 }
 

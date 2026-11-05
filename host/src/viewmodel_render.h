@@ -40,6 +40,11 @@ struct Frame {
     float fovY = 51.0f;       // vertical degrees
     float light = 1.0f;       // key light intensity (time of day, interiors)
     float ambient = 0.35f;
+    bool scene = true;        // light it by the frame behind it too (else `light` and `ambient` alone)
+    // GTA's HUD the gun must stay under (the radar in the bottom left corner): screen fractions x0, y0, x1,
+    // y1 of a box left out of the gun (x1 <= x0: none).
+    float keepOut[4] = {};
+    float keepOutAlpha = 0.18f; // how much of the gun shows in that box (0: none)
 };
 
 void SetLog(LogFn log);

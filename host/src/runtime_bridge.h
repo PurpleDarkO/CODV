@@ -63,6 +63,17 @@ public:
     std::uint32_t PlayAlias(const char* alias);
     // MW2's killstreak splash with the host's own title (false: no import HUD, or an older runtime).
     bool Splash(const char* title, const char* description, const float glow[4]);
+    // The host's lines in MW2's HUD fonts for the frames to come (false: no MW2 HUD, or an older runtime).
+    bool Text(const CvHudText* lines, std::uint32_t count);
+    // Diagnostics: what stops the MW2 player moving that way (empty: an older runtime).
+    std::string BlockedWhy(float forward, float right);
+    // A game mode's count in the score bar for the frames to come (false: no MW2 HUD, or an older runtime).
+    bool Scorebar(const CvHudBoard* board);
+    // A notice over the score bar's bars for `ms` (false: the score bar does not show, or an older runtime).
+    bool BoardNotice(const char* title, const char* line, std::uint32_t ms);
+    // An imported MW2 alias looped at `level` (0: not available); AliasLevel(handle, 0) stops it.
+    std::uint32_t LoopAlias(const char* alias, float level);
+    bool AliasLevel(std::uint32_t handle, float level);
     bool WeaponNumbers(const char* name, CvWeaponNumbers& out) const;
     bool Refill();
     // ABI 10: the images the next view models and MW2's HUD draw with (any thread; slow: decodes models).
@@ -113,6 +124,12 @@ private:
     CvKillstreakViewFn killstreakView_ = nullptr;
     CvPlayAliasFn playAlias_ = nullptr;
     CvMw2SplashFn splash_ = nullptr; // optional
+    CvMw2TextFn text_ = nullptr;     // optional
+    CvMw2BlockedWhyFn blockedWhy_ = nullptr; // optional
+    CvMw2ScorebarFn scorebar_ = nullptr;     // optional
+    CvMw2BoardNoticeFn boardNotice_ = nullptr; // optional
+    CvAliasLoopFn aliasLoop_ = nullptr;        // optional
+    CvAliasLevelFn aliasLevel_ = nullptr;      // optional
     CvMw2WeaponNumbersFn weaponNumbers_ = nullptr;
     CvMw2RefillFn refill_ = nullptr;
     CvVmReadyImagesFn vmReadyImages_ = nullptr;

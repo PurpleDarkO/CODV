@@ -30,6 +30,8 @@ public:
     std::string Status() const;
     // A cinematic has the view (the MW2 eye steps aside, the controls wait, the HUD hides).
     bool CinematicActive() const { return cine_ != Cine::None; }
+    // The police's breather after a nuke: no Juggernaut joins meanwhile (the ones up stay).
+    void SetPoliceGrace(bool on) { grace_ = on; }
 
 private:
     struct Unit {
@@ -48,10 +50,14 @@ private:
     void Cinematic(Ped player);
     void PlayPose(DWORD t); // his entrance pose (`t` ms into it)
     void EndCinematic();
+    void Down(); // his death said: over the score bar, else MW2's splash
+    bool downMinigun_ = false;    // the one down carried the minigun
+    static constexpr std::uint32_t kDownNoticeMs = 4000;
 
     std::vector<Unit> units_;
     std::uint32_t nextCheck_ = 0, calmSince_ = 0, nextRetask_ = 0, nextNoSpotLog_ = 0;
     bool rolled_ = false; // the chance came up: one comes as soon as he finds a spot
+    bool grace_ = false;  // no police sent (after a nuke)
     int pose_ = 0;        // the entrance pose picked last (each entrance picks another at random)
     bool posed_ = false;  // this entrance's pose has played
     int posePlays_ = 0;   // times this entrance's pose was (re)started

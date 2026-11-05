@@ -202,6 +202,9 @@ inline constexpr float kAirstrikeRadius = 512.0f;
 // the blast at 10 s with slow motion (0.25) until everyone dies 1.5 s later, then back to normal
 // over 2 s.
 inline constexpr std::uint32_t kNukeMs = 10000, kNukeIncomingMs = 6700, kNukeDeathMs = 11500, kNukeRecoverMs = 13500;
+// After the blast GTA sends no police for this long (CODV's): a head start while the stars run out; the
+// rest of the getaway is the player's.
+inline constexpr std::uint32_t kNukePoliceGraceMs = 30000;
 inline constexpr float kNukeRange = 400.0f; // CODV: everyone this close dies (metres)
 
 } // namespace ksrules

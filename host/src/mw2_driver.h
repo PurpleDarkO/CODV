@@ -10,6 +10,7 @@
 #include "mw2_input.h"
 #include "runtime_bridge.h"
 
+#include <cstdint>
 #include <string>
 
 #ifdef _WIN32
@@ -59,6 +60,8 @@ public:
     void Suspend(bool on);
     // The CODV menu is open: MW2 keeps the player and the view, with no input (no move, look, fire).
     void FreezeInput(bool on) { inputFrozen_ = on; }
+    // The pad's raw buttons this frame (XInput): D-pad left throws MW2's special grenade on a pad.
+    void SetPadButtons(std::uint16_t b) { padButtons_ = b; }
     bool Active() const { return active_; }
     // GTA has the player only for a ladder or a skydive: MW2's HUD stays on screen.
     bool Borrowed() const { return borrowed_; }
@@ -127,6 +130,7 @@ private:
     DWORD ladderProbeAt_ = 0;     // the last auto-ladder try
     DWORD stuckSince_ = 0, stuckLogAt_ = 0; // held still while pushing forward (logged for diagnosis)
     DWORD pinnedSince_ = 0, pinnedLogAt_ = 0; // any push, the player not moving (in the air too; logged)
+    DWORD duckSince_ = 0; // C held, standing still, since then (a ladder right ahead: climb it)
     float pinnedAt_[3] = {};
     DWORD mantleAt_ = 0;                    // a mantle under way since then (logged for diagnosis)
     float mantleZ_ = 0.0f;
@@ -157,6 +161,7 @@ private:
     float lens_ = 0.0f;
     bool thirdPerson_ = false, thirdPersonSet_ = false;
     bool inputFrozen_ = false;
+    std::uint16_t padButtons_ = 0;
     bool hidden_ = false;
     Entity hiddenGun_ = 0;
     // The debug panel.

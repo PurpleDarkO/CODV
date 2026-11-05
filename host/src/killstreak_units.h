@@ -50,6 +50,8 @@ public:
     void Tick(RuntimeBridge& runtime, Ped player, CvStreakView& view, std::uint32_t& give);
     void Stop();
     bool NukeInbound() const { return nuke_.on; }
+    // A while after the nuke's blast no police are sent (the player may get away; the stars run out).
+    bool PoliceGrace() const { return grace_; }
     // MW2's nuke kills its caller too (NukeKillsPlayer=1); CODV spares the player by default.
     void SetNukeKillsPlayer(bool on) { nukeKillsPlayer_ = on; }
     // The helicopter, the sentry, the airstrike's jets or the nuke is out (their kills are the player's;
@@ -108,6 +110,10 @@ private:
     };
     void TickAftermath();
     void EndAftermath();
+    // The police's breather after the blast: no dispatch (cars, helicopters, SWAT, roadblocks) nor random cops.
+    void Grace(bool on);
+    bool grace_ = false;
+    std::uint32_t graceUntil_ = 0;
 
     void TickHeli(Ped player);
     void TickSentry(RuntimeBridge& runtime, Ped player);

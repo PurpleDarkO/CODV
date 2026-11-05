@@ -74,6 +74,8 @@ inline std::vector<int> Suppressed(const Frame& f) {
             // Keys 1 / 2 / 3 / 5 are CODV's weapon slots there, not GTA's weapon categories; 4 is action slot 4.
             for (int c : input::kSlotKeys) out.push_back(c);
             out.push_back(ksrules::kActionSlotKey);
+            out.push_back(input::kEquipmentKey);
+            out.push_back(input::kTacticalKey);
             // While a reward waits the pad's D-pad right calls it in instead of GTA's context action.
             if (f.rewardHeld || f.lean) out.push_back(ksrules::kContext);
             if (f.remote)

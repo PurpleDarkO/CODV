@@ -46,6 +46,12 @@ bool RuntimeBridge::Load(const wchar_t* dllPath, const std::string& dataRoot, co
         return false;
     // Optional exports (additions to the ABI): missing in an older runtime, the host does without.
     splash_ = reinterpret_cast<CvMw2SplashFn>(GetProcAddress(module_, "cv_mw2_splash"));
+    text_ = reinterpret_cast<CvMw2TextFn>(GetProcAddress(module_, "cv_mw2_text"));
+    blockedWhy_ = reinterpret_cast<CvMw2BlockedWhyFn>(GetProcAddress(module_, "cv_mw2_blocked_why"));
+    scorebar_ = reinterpret_cast<CvMw2ScorebarFn>(GetProcAddress(module_, "cv_mw2_scorebar"));
+    boardNotice_ = reinterpret_cast<CvMw2BoardNoticeFn>(GetProcAddress(module_, "cv_mw2_board_notice"));
+    aliasLoop_ = reinterpret_cast<CvAliasLoopFn>(GetProcAddress(module_, "cv_alias_loop"));
+    aliasLevel_ = reinterpret_cast<CvAliasLevelFn>(GetProcAddress(module_, "cv_alias_level"));
     apiVersion_ = version();
     if (apiVersion_ != CODV_ABI_VERSION) {
         error = "runtime ABI " + std::to_string(apiVersion_) + ", host expects " + std::to_string(CODV_ABI_VERSION) +
@@ -219,6 +225,32 @@ std::uint32_t RuntimeBridge::PlayAlias(const char* alias) {
 
 bool RuntimeBridge::Splash(const char* title, const char* description, const float glow[4]) {
     return runtime_ && splash_ && title && splash_(runtime_, title, description, glow) != 0;
+}
+
+std::string RuntimeBridge::BlockedWhy(float forward, float right) {
+    char buf[512] = "";
+    if (!runtime_ || !blockedWhy_ || !blockedWhy_(runtime_, forward, right, buf, sizeof(buf))) return {};
+    return buf;
+}
+
+bool RuntimeBridge::BoardNotice(const char* title, const char* line, std::uint32_t ms) {
+    return runtime_ && boardNotice_ && title && boardNotice_(runtime_, title, line, ms) != 0;
+}
+
+std::uint32_t RuntimeBridge::LoopAlias(const char* alias, float level) {
+    return runtime_ && aliasLoop_ && alias ? aliasLoop_(runtime_, alias, level) : 0u;
+}
+
+bool RuntimeBridge::AliasLevel(std::uint32_t handle, float level) {
+    return runtime_ && aliasLevel_ && handle && aliasLevel_(runtime_, handle, level) != 0;
+}
+
+bool RuntimeBridge::Scorebar(const CvHudBoard* board) {
+    return runtime_ && scorebar_ && scorebar_(runtime_, board) != 0;
+}
+
+bool RuntimeBridge::Text(const CvHudText* lines, std::uint32_t count) {
+    return runtime_ && text_ && text_(runtime_, lines, count) != 0;
 }
 
 bool RuntimeBridge::WeaponNumbers(const char* name, CvWeaponNumbers& out) const {

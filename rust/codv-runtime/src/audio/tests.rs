@@ -122,6 +122,24 @@ fn delay_secondary_and_chain_follow_the_alias() {
 }
 
 #[test]
+fn a_loop_plays_at_its_level_until_stopped() {
+    // A one-shot alias, looped by play_loop; its level scales it and 0 stops it.
+    let mut src = Mem(HashMap::from([("a.wav".to_owned(), constant(48_000, 100, 16384))]));
+    let aliases = bank(&[("a", variant("a.wav"))]);
+    let mut m = Mixer::new(1);
+    assert_eq!(m.play_loop(&aliases, &mut src, "a", 7, 0.5), 1);
+    let mut out = vec![0.0; 300];
+    m.render(&mut out);
+    assert!((out[250] - 0.25).abs() < 1e-3, "looped past its end at half level: {}", out[250]);
+    assert_eq!(m.set_level(7, 1.0), 1);
+    m.render(&mut out);
+    assert!((out[10] - 0.5).abs() < 1e-3);
+    assert_eq!(m.set_level(9, 1.0), 0, "another handle reaches nothing");
+    assert_eq!(m.set_level(7, 0.0), 1);
+    assert_eq!(m.voices(), 0);
+}
+
+#[test]
 fn the_oldest_voice_makes_room() {
     let mut src = Mem(HashMap::from([("a.wav".to_owned(), constant(48_000, 48_000, 1000))]));
     let aliases = bank(&[("a", variant("a.wav"))]);

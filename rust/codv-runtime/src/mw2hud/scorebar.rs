@@ -81,10 +81,104 @@ impl Score {
     }
 }
 
+/// A game mode's own count in the score bar's frame (cv_mw2_scorebar): the big number and its caption, the
+/// small gold line under them, each bar's share (0..1) and its row of text. Sent every frame; gone when not
+/// sent again for a moment (the score bar's own count is back).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HostBoard {
+    pub big: u32,
+    pub caption: String,
+    pub under: String,
+    pub top_share: f32,
+    pub top_row: String,
+    pub bottom_share: f32,
+    pub bottom_row: String,
+    /// Over the bars: a title (a mode's state: "GET READY", "WAVE 3 CLEARED") and a line under it (empty: none).
+    pub title: String,
+    pub line: String,
+}
+
+/// A mode's board not sent again within this long is dropped (ms).
+const HOST_BOARD_STALE_MS: i32 = 500;
+
+/// What the score bar shows this frame: CODV's count, or a game mode's.
+struct Board {
+    big: String,
+    caption: String,
+    under: String,
+    top: f32,
+    bottom: f32,
+    top_row: String,
+    bottom_row: String,
+    title: String,
+    line: String,
+}
+
 impl Mw2Hud {
-    pub(super) fn scorebar(&mut self, out: &mut Vec<Quad>, sp: &h::ScreenPlacement) {
+    /// A notice over the score bar's bars for `ms` (the title in the big font, a line under it). False when the
+    /// score bar does not show (the caller says it another way).
+    pub fn board_notice(&mut self, title: &str, line: &str, ms: i32) -> bool {
+        let fresh =
+            self.host_board.as_ref().is_some_and(|(_, at)| self.time_ms.wrapping_sub(*at) <= HOST_BOARD_STALE_MS);
+        if !self.scorebar_on && !fresh {
+            return false;
+        }
+        self.board_notice = Some((title.to_owned(), line.to_owned(), self.time_ms.wrapping_add(ms.clamp(500, 15000))));
+        true
+    }
+
+    /// A game mode's count for the score bar's frames to come (None: the score bar's own count).
+    pub fn set_host_board(&mut self, board: Option<HostBoard>) {
+        self.host_board = board.map(|b| (b, self.time_ms));
+    }
+
+    fn board(&mut self) -> Option<Board> {
+        if let Some((b, at)) = &self.host_board {
+            if self.time_ms.wrapping_sub(*at) <= HOST_BOARD_STALE_MS {
+                return Some(Board {
+                    big: b.big.to_string(),
+                    caption: b.caption.clone(),
+                    under: b.under.clone(),
+                    top: b.top_share.clamp(0.0, 1.0),
+                    bottom: b.bottom_share.clamp(0.0, 1.0),
+                    top_row: b.top_row.clone(),
+                    bottom_row: b.bottom_row.clone(),
+                    title: b.title.clone(),
+                    line: b.line.clone(),
+                });
+            }
+            self.host_board = None;
+        }
         if !self.scorebar_on {
-            return;
+            return None;
+        }
+        let streak = self.data.string("MENU_STREAK").unwrap_or("Streak").to_owned();
+        let deaths = self.data.string("CGAME_SB_DEATHS").unwrap_or("Deaths").to_owned();
+        Some(Board {
+            big: self.score.total.to_string(),
+            caption: self.data.string("CGAME_SB_KILLS").unwrap_or("Kills").to_owned(),
+            under: format!("Round {}", self.score.round()),
+            top: self.score.streak_share(),
+            bottom: self.score.kd_share(),
+            top_row: format!("{streak} {}", self.score.life),
+            bottom_row: format!("{deaths} {}", self.score.deaths),
+            title: String::new(),
+            line: String::new(),
+        })
+    }
+
+    pub(super) fn scorebar(&mut self, out: &mut Vec<Quad>, sp: &h::ScreenPlacement) {
+        let Some(mut board) = self.board() else { return };
+        // A timed notice over the bars (a Juggernaut down), where a mode's own title is not.
+        if let Some((title, line, until)) = &self.board_notice {
+            if until.wrapping_sub(self.time_ms) > 0 {
+                if board.title.is_empty() {
+                    board.title = title.clone();
+                    board.line = line.clone();
+                }
+            } else {
+                self.board_notice = None;
+            }
         }
         let items = self.data.menu("scorebar_hd").to_vec();
         let Some(bg) = items.iter().find(|i| i.background.eq_ignore_ascii_case("hud_scorebar")).cloned() else {
@@ -99,7 +193,7 @@ impl Mw2Hud {
             it.rect[1] -= RAISE;
             it
         };
-        let (top, bottom) = (self.score.streak_share(), self.score.kd_share());
+        let (top, bottom) = (board.top, board.bottom);
         for it in &items {
             let name = it.background.to_ascii_lowercase();
             if !name.starts_with("hud_scorebar") {
@@ -126,29 +220,33 @@ impl Mw2Hud {
             text_style: 3,
             ..Default::default()
         };
-        // The icon square: the session's kills, "Kills" under them, the round in small under that.
+        // The icon square: the big count (the session's kills), its caption, a small gold line under that
+        // (the round, a mode's wave).
         let side = 54.667;
         let square = [bg.rect[0] + 5.333, bg.rect[1] + 3.0, side, side * 0.52];
-        let total = self.score.total.to_string();
-        self.item_text(out, sp, &text(square, 1 | 8, 0.5, [1.0; 4]), &total, [1.0; 4]);
-        let caption = self.data.string("CGAME_SB_KILLS").unwrap_or("Kills").to_owned();
+        self.item_text(out, sp, &text(square, 1 | 8, 0.5, [1.0; 4]), &board.big, [1.0; 4]);
         let under = [square[0], square[1] + square[3], side, side * 0.22];
         let grey = [0.85, 0.85, 0.85, 0.9];
-        self.item_text(out, sp, &text(under, 1 | 8, 0.22, grey), &caption, grey);
+        self.item_text(out, sp, &text(under, 1 | 8, 0.22, grey), &board.caption, grey);
         let gold = [1.0, 0.8, 0.4, 0.95];
         let low = [square[0], under[1] + under[3], side, side * 0.2];
-        let round = format!("Round {}", self.score.round());
-        self.item_text(out, sp, &text(low, 1 | 8, 0.17, gold), &round, gold);
-        // Beside the bars: "Streak N" (top), "Deaths N" (bottom).
+        self.item_text(out, sp, &text(low, 1 | 8, 0.17, gold), &board.under, gold);
+        // Beside the bars: their rows ("Streak N" and "Deaths N", or a mode's).
         let x = bg.rect[0] + 232.0;
-        let streak = self.data.string("MENU_STREAK").unwrap_or("Streak").to_owned();
-        let deaths = self.data.string("CGAME_SB_DEATHS").unwrap_or("Deaths").to_owned();
-        let rows = [
-            (bg.rect[1] + 18.0, 12.0, format!("{streak} {}", self.score.life)),
-            (bg.rect[1] + 31.333, 10.667, format!("{deaths} {}", self.score.deaths)),
-        ];
+        let rows = [(bg.rect[1] + 18.0, 12.0, board.top_row), (bg.rect[1] + 31.333, 10.667, board.bottom_row)];
         for (y, h, line) in rows {
             self.item_text(out, sp, &text([x, y, 100.0, h], 8, 0.3333, [1.0; 4]), &line, [1.0; 4]);
+        }
+        // Over the bars: a mode's state in the big title font (blood red, a dark glow) and its line under it.
+        let left = bg.rect[0] + 70.0;
+        if !board.title.is_empty() {
+            let red = [0.85, 0.1, 0.06, 1.0];
+            let title = Item { font: 9, ..text([left, bg.rect[1] - 30.0, 200.0, 16.0], 8, 0.42, red) };
+            self.item_text_glow(out, sp, &title, &board.title, red, Some([0.35, 0.0, 0.0, 0.8]));
+        }
+        if !board.line.is_empty() {
+            let white = [0.93, 0.93, 0.88, 1.0];
+            self.item_text(out, sp, &text([left, bg.rect[1] - 12.0, 220.0, 11.0], 8, 0.28, white), &board.line, white);
         }
     }
 
@@ -156,7 +254,11 @@ impl Mw2Hud {
     /// back after a death.
     pub(super) fn round_over(&mut self, out: &mut Vec<Quad>, sp: &h::ScreenPlacement) {
         let Some((kills, start)) = self.score.round_over else { return };
-        if !self.scorebar_on {
+        // A game mode with its own board (Survival) says its own end in the score bar's frame: no centred
+        // "Round Over" over it.
+        let host_board =
+            matches!(&self.host_board, Some((_, at)) if self.time_ms.wrapping_sub(*at) <= HOST_BOARD_STALE_MS);
+        if !self.scorebar_on || host_board {
             self.score.round_over = None;
             return;
         }
@@ -215,5 +317,25 @@ mod tests {
         assert_eq!(s.round(), 3);
         s.reset();
         assert_eq!(s, Score::default());
+    }
+
+    #[test]
+    fn a_modes_board_takes_the_score_bar_while_sent() {
+        let mut hud = Mw2Hud::new(Hud::default());
+        hud.scorebar_on = false;
+        assert!(hud.board().is_none(), "the score bar off: nothing");
+        hud.set_host_board(Some(HostBoard {
+            big: 42,
+            under: "Wave 3/15".into(),
+            top_share: 2.0,
+            ..Default::default()
+        }));
+        let b = hud.board().expect("a mode's board shows");
+        assert_eq!((b.big.as_str(), b.under.as_str(), b.top), ("42", "Wave 3/15", 1.0));
+        hud.time_ms += HOST_BOARD_STALE_MS + 1;
+        assert!(hud.board().is_none(), "not sent again: gone");
+        assert!(!hud.board_notice("JUGGERNAUT DOWN", "", 3000), "no score bar: said another way");
+        hud.scorebar_on = true;
+        assert!(hud.board_notice("JUGGERNAUT DOWN", "Enemy Juggernaut killed", 3000));
     }
 }

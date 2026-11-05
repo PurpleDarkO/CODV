@@ -91,6 +91,7 @@ CV_NATIVE(GET_CURRENT_PED_WEAPON_ENTITY_INDEX, 0x3B390A939AF0B5FC) // Entity (Pe
 CV_NATIVE(IS_PED_ON_FOOT, 0x01FEE67DB37F59B2)                    // BOOL (Ped)
 CV_NATIVE(IS_PED_IN_ANY_VEHICLE, 0x997ABD671D25CA0B)             // BOOL (Ped, BOOL atGetIn)
 CV_NATIVE(IS_PED_RAGDOLL, 0x47E4E977581C5B55)                    // BOOL (Ped)
+CV_NATIVE(SET_PED_TO_RAGDOLL, 0xAE99FB955581844A)                // BOOL (Ped, int minMs, int maxMs, int type, BOOL, BOOL, BOOL)
 CV_NATIVE(IS_PED_FALLING, 0xFB92A102F1C4DFA3)                    // BOOL (Ped)
 CV_NATIVE(IS_PED_JUMPING, 0xCEDABC5900A0BF97)                    // BOOL (Ped)
 CV_NATIVE(IS_PED_SPRINTING, 0x57E457CD2C0FC168)                  // BOOL (Ped)
@@ -286,6 +287,7 @@ CV_NATIVE(CLEAR_PLAYER_WANTED_LEVEL, 0xB302540597885499) // void (Player)
 CV_NATIVE(GET_PLAYER_WANTED_LEVEL, 0xE28E54788CE8F12D) // int (Player)
 CV_NATIVE(ARE_PLAYER_STARS_GREYED_OUT, 0x0A6EB355EE14A2DB)        // BOOL (Player): the police lost sight, searching
 CV_NATIVE(SET_CREATE_RANDOM_COPS, 0x102E68B2024D536D) // void (BOOL)
+CV_NATIVE(ENABLE_DISPATCH_SERVICE, 0xDC0F817884CDD856) // void (int type, BOOL)
 CV_NATIVE(SET_BLIP_ALPHA, 0x45FF974EEE1C8734)      // void (Blip, int)
 CV_NATIVE(SET_VEHICLE_SIREN, 0xF4924635A19EB37D)   // void (Vehicle, BOOL)
 CV_NATIVE(TASK_COMBAT_HATED_TARGETS_AROUND_PED, 0x7BF835BB9E2698C8) // void (Ped, float radius, int flags)
@@ -300,6 +302,25 @@ CV_NATIVE(SET_PED_AS_COP, 0xBB03C38DD3FB7FFD)      // void (Ped, BOOL) (a cop: n
 CV_NATIVE(SET_PED_SHOOT_RATE, 0x614DA022990752DC)  // void (Ped, int 0..1000)
 CV_NATIVE(IS_ENTITY_PLAYING_ANIM, 0x1F0B79228E461EC9) // BOOL (Entity, dict, anim, int taskFlag)
 CV_NATIVE(DOES_ANIM_DICT_EXIST, 0x2DA49C3B79856961) // BOOL (const char*)
+CV_NATIVE(IS_SPHERE_VISIBLE, 0xE33D59DA70B58FDF)    // BOOL (x, y, z, radius): on screen, not hidden
+CV_NATIVE(GET_SCRIPT_TASK_STATUS, 0x77F1BEB8863288D5) // int (Ped, Hash task): 1 running, 7 none
+CV_NATIVE(SET_PED_MIN_MOVE_BLEND_RATIO, 0x01A898D26E2333DD) // void (Ped, float): every frame
+CV_NATIVE(SET_PED_MAX_MOVE_BLEND_RATIO, 0x433083750C5E064A) // void (Ped, float): every frame
+CV_NATIVE(SET_PED_PATH_CAN_USE_CLIMBOVERS, 0x8E06A6FE76C9EFF4) // void (Ped, BOOL)
+CV_NATIVE(TASK_JUMP, 0x0AE4086104E067B1)            // void (Ped, BOOL playerLaunchForce, BOOL superJump, BOOL fullSuperJumpForce)
+CV_NATIVE(IS_PED_MALE, 0x6D9F5FAA7488BA46)          // BOOL (Ped)
+CV_NATIVE(SET_PED_MONEY, 0xA9C8960E8684C1B5)        // void (Ped, int amount): the cash it drops when killed
+CV_NATIVE(SET_AMBIENT_PEDS_DROP_MONEY, 0x6B0E6172C9A4D902) // void (BOOL)
+CV_NATIVE(ANIMPOSTFX_PLAY, 0x2206BF9A37B7F724)      // void (const char* effect, int ms, BOOL looped)
+CV_NATIVE(ANIMPOSTFX_STOP, 0x068E835A1D0DC0E3)      // void (const char* effect)
+CV_NATIVE(GET_VEHICLE_MAX_NUMBER_OF_PASSENGERS, 0xA7C4F2C6E744A550) // int (Vehicle): seats besides the driver
+CV_NATIVE(PLAY_PED_AMBIENT_SPEECH_NATIVE, 0x8E04FEDD28D42462) // void (Ped, const char* speech, const char* param, Any)
+CV_NATIVE(PLAY_PED_AMBIENT_SPEECH_WITH_VOICE_NATIVE, 0x3523634255FC3318) // void (Ped, speech, voice, param, BOOL)
+CV_NATIVE(SET_AMBIENT_VOICE_NAME, 0x6C8065A3B780185B) // void (Ped, const char* voice)
+CV_NATIVE(TASK_FOLLOW_NAV_MESH_TO_COORD, 0x15D3A79D4E44B913) // void (Ped, x, y, z, float moveBlend, int ms, float radius, int flags, float heading)
+CV_NATIVE(TASK_GO_STRAIGHT_TO_COORD, 0xD76B57B44F1E6F8B) // void (Ped, x, y, z, float moveBlend, int ms, float heading, float slide)
+CV_NATIVE(TASK_SMART_FLEE_COORD, 0x94587F17E9C365D5) // void (Ped, x, y, z, float distance, int ms, BOOL pavements, BOOL quitOutOfRange)
+CV_NATIVE(SET_ENTITY_PROOFS, 0xFAEE099C6F890BB8)    // void (Entity, bullet, fire, explosion, collision, melee, steam, BOOL keep, drown)
 CV_NATIVE(CLEAR_PED_TASKS_IMMEDIATELY, 0xAAA34F8A7CB32098) // void (Ped)
 CV_NATIVE(SET_PED_CURRENT_WEAPON_VISIBLE, 0x0725A4CCFDED9A70) // void (Ped, BOOL visible, BOOL deselect, BOOL, BOOL)
 CV_NATIVE(SET_ENTITY_CAN_BE_DAMAGED_BY_RELATIONSHIP_GROUP, 0xE22D8FDE858B8119) // void (Entity, BOOL, int group)
@@ -315,6 +336,20 @@ CV_NATIVE(SET_VEHICLE_ENGINE_HEALTH, 0x45F6D8EEF34ABEF1) // void (Vehicle, float
 CV_NATIVE(START_VEHICLE_HORN, 0x9C8C6504B5B63D2C)  // void (Vehicle, int ms, Hash mode, BOOL forever)
 CV_NATIVE(DELETE_VEHICLE, 0xEA386986E786A54F)      // void (Vehicle*)
 CV_NATIVE(SET_VEHICLE_AS_NO_LONGER_NEEDED, 0x629BFA74418D6239) // void (Vehicle*)
+// CODV's explosives (equipment.cpp): a charge stuck on a car or a person, its light, a Claymore's lasers.
+CV_NATIVE(ATTACH_ENTITY_TO_ENTITY, 0x6B9BBD38AB0796DF)   // void (Entity, Entity to, int bone, 3 offset, 3 rot, BOOL, BOOL soft, BOOL collision, BOOL isPed, int vertex, BOOL fixedRot, int)
+CV_NATIVE(GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS, 0x2274BC1C4885E333) // Vector3 (Entity, float, float, float)
+CV_NATIVE(IS_ENTITY_AN_OBJECT, 0x8D68C8FD0FACA94E)       // BOOL (Entity)
+CV_NATIVE(DRAW_LINE, 0x6B7256074AE34680)                 // void (3 from, 3 to, int r, int g, int b, int a)
+CV_NATIVE(DRAW_LIGHT_WITH_RANGE, 0xF2A1B2771A01DBD4)     // void (3 at, int r, int g, int b, float range, float intensity)
+// MW2's special grenades (tactical.cpp): a flashed or stunned hostile shields its eyes.
+CV_NATIVE(TASK_COWER, 0x3EB1FE9E8E908E15)                // void (Ped, int ms)
+CV_NATIVE(IS_MODEL_IN_CDIMAGE, 0x35B9E0803292B641)       // BOOL (Hash): the game has this model
+// GTA's HUD over MW2's gun (main.cpp): where the radar is, the phone and the weapon wheel up.
+CV_NATIVE(GET_SAFE_ZONE_SIZE, 0xBAF107B6BB2C97F0)        // float ()
+CV_NATIVE(IS_RADAR_HIDDEN, 0x157F93B036700462)           // BOOL ()
+CV_NATIVE(IS_PED_RUNNING_MOBILE_PHONE_TASK, 0x2AFE52F782F25775) // BOOL (Ped)
+CV_NATIVE(IS_HUD_COMPONENT_ACTIVE, 0xBC4C9EA5391ECC0D)   // BOOL (int component)
 #undef CV_NATIVE
 
 } // namespace gta

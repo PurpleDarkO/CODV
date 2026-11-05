@@ -301,6 +301,9 @@ float Update(RuntimeBridge& runtime, const Input& in) {
         g_frame.fovY = fovY;
         g_frame.light = in.key;
         g_frame.ambient = in.ambient;
+        g_frame.scene = in.scene;
+        for (int k = 0; k < 4; ++k) g_frame.keepOut[k] = in.keepOut[k];
+        g_frame.keepOutAlpha = in.keepOutAlpha;
     }
     char line[96];
     std::snprintf(line, sizeof(line), "viewmodel: mesh %u, %u bones, ads %.2f", f.mesh_id, f.bone_count, f.ads);

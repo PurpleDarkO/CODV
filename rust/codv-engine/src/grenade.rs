@@ -9,7 +9,7 @@
 //!
 //! The world is the same `World` pmove collides with (IW4 units, in the
 //! player's frame). Damage is the host's (GTA's explosion at the point).
-use crate::arms::Throw;
+use crate::arms::{Throw, ThrowKind};
 use crate::world::{CONTENTS_SOLID, World};
 
 #[cfg(test)]
@@ -23,6 +23,9 @@ pub const PARALLEL_BOUNCE: f32 = 0.5;
 pub const PERPENDICULAR_BOUNCE: f32 = 0.25;
 /// Half size of the box the grenade sweeps (units).
 const HALF: f32 = 1.5;
+/// A sticking throw (the Semtex, the C4, the knife) passes through what it meets this close to the hand (units):
+/// it leaves from the eye, inside the thrower's own space (a hit there stuck it in the air, at the chest).
+const LEAVE_HAND: f32 = 40.0;
 /// Fuse when none is authored, and the longest one (iw4L GRENADE_*_FUSE_MS).
 const DEFAULT_FUSE_MS: i32 = 3500;
 const FUSE_CAP_MS: i32 = 30_000;
@@ -37,6 +40,13 @@ pub struct Grenade {
     /// Milliseconds until it goes off.
     pub fuse_ms: i32,
     pub resting: bool,
+    /// A Semtex stuck where it hit (its fuse runs from then).
+    pub stuck: bool,
+    /// A C4 or a Claymore came to rest: the host takes it over (it never goes off here).
+    pub landed: bool,
+    /// Where it left the hand (IW4 units, player's frame): what it meets within LEAVE_HAND of it is the
+    /// thrower's own space, never a surface to stick to.
+    pub start: [f32; 3],
     /// Spin for the host's model (degrees: pitch, roll, yaw).
     pub angles: [f32; 3],
     pub throw: Throw,
@@ -115,8 +125,12 @@ impl Grenade {
             weapon,
             origin: eye,
             velocity: launch_velocity(forward(angles), &t, owner_velocity),
-            fuse_ms: fuse.min(FUSE_CAP_MS),
+            // The C4 and the Claymore wait for the host, never for a fuse.
+            fuse_ms: if t.kind.lands() { FUSE_CAP_MS } else { fuse.min(FUSE_CAP_MS) },
             resting: false,
+            stuck: false,
+            landed: false,
+            start: eye,
             angles: [0.0, 0.0, angles[1]],
             throw: t,
         }
@@ -125,6 +139,20 @@ impl Grenade {
     /// Moves the grenade `msec` against `world`; Some when it went off.
     pub fn step(&mut self, msec: i32, world: &dyn World) -> Option<Explosion> {
         let msec = msec.clamp(0, 200);
+        if self.throw.kind.lands() {
+            // Never on a fuse: a C4 or a Claymore lands and is the host's (one lost in the air goes at the cap).
+            if !self.resting {
+                let mut left = msec;
+                while left > 0 && !self.resting {
+                    let ms = left.min(10);
+                    left -= ms;
+                    self.advance(ms as f32 / 1000.0, world);
+                }
+            }
+            self.landed = self.resting;
+            self.fuse_ms -= msec;
+            return (self.fuse_ms <= 0 && !self.landed).then(|| self.explosion());
+        }
         self.fuse_ms -= msec;
         if !self.resting {
             // Sub-steps of at most 10 ms keep fast grenades from tunnelling.
@@ -163,6 +191,21 @@ impl Grenade {
             ];
             let tr = world.trace(self.origin, end, [-HALF; 3], [HALF; 3], CONTENTS_SOLID);
             let f = if tr.startsolid != 0 { 0.0 } else { tr.fraction.clamp(0.0, 1.0) };
+            // Just out of the hand, a sticking throw goes through (the thrower's own space, never a target).
+            if self.throw.kind.sticks() && f < 1.0 {
+                let d = [end[0] - self.start[0], end[1] - self.start[1], end[2] - self.start[2]];
+                let hit = [
+                    self.origin[0] + (end[0] - self.origin[0]) * f - self.start[0],
+                    self.origin[1] + (end[1] - self.origin[1]) * f - self.start[1],
+                    self.origin[2] + (end[2] - self.origin[2]) * f - self.start[2],
+                ];
+                if (tr.startsolid != 0 && len(d) < LEAVE_HAND * 2.0) || len(hit) < LEAVE_HAND {
+                    self.origin = end;
+                    self.velocity[2] -= GRAVITY * time;
+                    self.spin(time);
+                    return;
+                }
+            }
             let used = time * f;
             for (o, e) in self.origin.iter_mut().zip(end) {
                 *o += (e - *o) * f;
@@ -174,6 +217,20 @@ impl Grenade {
                 return;
             }
             let normal = if tr.startsolid != 0 { [0.0, 0.0, 1.0] } else { tr.normal };
+            if self.throw.kind.sticks() {
+                // The Semtex and the C4 stick where they first hit; the Claymore stays where it lands.
+                for (o, n) in self.origin.iter_mut().zip(normal) {
+                    *o += n * 0.5;
+                }
+                self.velocity = [0.0; 3];
+                self.resting = true;
+                if self.throw.kind == ThrowKind::Sticky {
+                    self.stuck = true;
+                    let fuse = if self.throw.fuse_time_ms > 0 { self.throw.fuse_time_ms } else { DEFAULT_FUSE_MS };
+                    self.fuse_ms = fuse.min(FUSE_CAP_MS);
+                }
+                return;
+            }
             self.velocity = bounce(self.velocity, normal, PARALLEL_BOUNCE, PERPENDICULAR_BOUNCE);
             // Off the surface a little, so the next sweep does not start inside it.
             for (o, n) in self.origin.iter_mut().zip(normal) {

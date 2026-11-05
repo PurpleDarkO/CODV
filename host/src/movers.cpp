@@ -11,6 +11,8 @@ namespace {
 using gta::Call;
 
 constexpr int kPoolScratch = 1024;
+constexpr int kBoneHead = 31086;      // SKEL_Head
+constexpr float kLyingHead = 0.75f;   // a ped whose head is this low above its feet lies on the ground
 constexpr std::size_t kMaxMovers = 96;
 
 float Dist2(const Vector3& a, const Vector3& b) {
@@ -42,6 +44,14 @@ bool Gatherer::Add(int entity, std::uint32_t kind) {
         if (Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, entity, TRUE) || Call<BOOL>(gta::IS_ENTITY_DEAD, entity, FALSE) ||
             Call<BOOL>(gta::IS_PED_RAGDOLL, entity))
             return false;
+        // A ped lying or crawling on the ground (a wounded one writhing, a crawler): its standing hull would be
+        // an invisible wall where it lies. Its head tells (the ped's origin is about a metre above its feet).
+        const Vector3 at = Call<Vector3>(gta::GET_ENTITY_COORDS, entity, FALSE);
+        const Vector3 head = Call<Vector3>(gta::GET_PED_BONE_COORDS, entity, kBoneHead, 0.0f, 0.0f, 0.0f);
+        if (head.z - (at.z - 1.0f) < kLyingHead) {
+            ++stats_.lying;
+            return false;
+        }
     } else if (kind == CV_MOVER_OBJECT && Call<BOOL>(gta::IS_ENTITY_ATTACHED, entity)) {
         return false;
     } else if (kind == CV_MOVER_OBJECT && Call<BOOL>(gta::HAS_OBJECT_BEEN_BROKEN, entity, 0)) {

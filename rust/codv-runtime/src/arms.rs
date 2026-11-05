@@ -84,8 +84,17 @@ pub const MENU_LAUNCHERS: &[&str] = &["rpg", "at4", "stinger", "javelin", "m79"]
 pub const SET_SIZE: usize = 3;
 /// The number keys' groups (keys 1, 2, 3 and 5): primaries, secondaries, snipers, launchers.
 pub const SETS: usize = 4;
-/// The thrown grenade on MW2's frag button.
+/// The thrown grenade on MW2's frag button by default.
 pub const FRAG: &str = "frag_grenade_mp";
+/// What the frag button can carry (CV_OPT_LETHAL's index): MW2's frag, or the Semtex, the C4 or the
+/// Claymore (codv_engine::arms::EQUIPMENT), each thrown with its own animation.
+pub const LETHALS: [&str; 5] = [FRAG, "semtex_mp", "c4_mp", "claymore_mp", "throwingknife_mp"];
+/// The HUD's label for each.
+const LETHAL_LABELS: [&str; 5] = ["FRAG", "SEMTEX", "C4", "CLAYMORE", "KNIFE"];
+/// MW2's special grenades on the smoke button (CV_OPT_TACTICAL's index - 1; 0: none).
+pub use codv_engine::arms::TACTICALS;
+/// How many special grenades are carried (MW2's two flashbangs or stuns; the smoke too, CODV's).
+pub const TACTICAL_COUNT: i32 = 2;
 
 /// Weapon requests beyond MW2's (CvMoveInput::weapon_request, number keys):
 /// the knife (melee on the trigger) and the frag in hand (thrown on the trigger).
@@ -168,6 +177,10 @@ pub struct Arms {
     /// Spare rounds times this (AmmoScale; MW2 is 1) and frags carried.
     pub ammo_scale: f32,
     pub frags: i32,
+    /// LETHALS' index on the frag button (CV_OPT_LETHAL).
+    pub lethal: usize,
+    /// The smoke button's special grenade (CV_OPT_TACTICAL: 0 none, 1.. TACTICALS).
+    pub tactical: usize,
     /// Weapon ids of MENU_GUNS the player's MW2 has (the menu's list).
     pub menu: Vec<u32>,
     /// The knife or the frag on the trigger (number keys 1 / 4).
@@ -298,6 +311,8 @@ impl Arms {
             damage_scale,
             ammo_scale,
             frags,
+            lethal: 0,
+            tactical: 0,
             menu,
             hand: Hand::Gun,
             rows,
@@ -326,7 +341,8 @@ impl Arms {
         if self.gunner.is_none() {
             let mut g = Gunner::new(&self.arsenal, &self.loadout)
                 .with_reserve_scale(&self.arsenal, self.ammo_scale)
-                .with_frags(&self.arsenal, FRAG, self.frags);
+                .with_frags(&self.arsenal, self.lethal_name(), self.frags)
+                .with_tacticals(&self.arsenal, self.tactical_name(), TACTICAL_COUNT);
             // Back after a pause, a menu or a cutscene: the rounds the player had.
             if let Some((ammo, frags)) = self.kept.take() {
                 g.restore_ammo(&ammo, frags);
@@ -612,8 +628,51 @@ impl Arms {
     /// The loadout's guns and the frag: what the player can hold next (their
     /// view models and sounds are read ahead of the mode).
     pub fn ready_set(&self) -> Vec<&Gun> {
-        let frag = self.arsenal.offhand_id(FRAG).and_then(|id| self.arsenal.any(id));
-        self.loadout.iter().filter_map(|&id| self.arsenal.gun(id)).chain(frag).collect()
+        let frag = self.arsenal.offhand_id(self.lethal_name()).and_then(|id| self.arsenal.any(id));
+        let tactical = self.arsenal.offhand_id(self.tactical_name()).and_then(|id| self.arsenal.any(id));
+        self.loadout.iter().filter_map(|&id| self.arsenal.gun(id)).chain(frag).chain(tactical).collect()
+    }
+
+    /// The frag button's grenade by name: LETHALS[lethal] when the player's MW2 import has it, else the frag.
+    pub fn lethal_name(&self) -> &'static str {
+        let want = LETHALS[self.lethal.min(LETHALS.len() - 1)];
+        if self.arsenal.offhand_id(want).is_some() { want } else { FRAG }
+    }
+
+    /// The smoke button's special grenade by name ("": none).
+    pub fn tactical_name(&self) -> &'static str {
+        self.tactical.checked_sub(1).and_then(|i| TACTICALS.get(i)).copied().unwrap_or("")
+    }
+
+    /// The smoke button's special grenade (0 none, 1.. TACTICALS), a full count of it from now on. False
+    /// when the player's MW2 import lacks it.
+    pub fn set_tactical(&mut self, index: usize) -> bool {
+        let name = match index.checked_sub(1) {
+            None => "",
+            Some(i) => match TACTICALS.get(i) {
+                Some(&n) if self.arsenal.offhand_id(n).is_some() => n,
+                _ => return false,
+            },
+        };
+        self.tactical = index;
+        if let Some(g) = self.gunner.take() {
+            self.gunner = Some(g.with_tacticals(&self.arsenal, name, TACTICAL_COUNT));
+        }
+        true
+    }
+
+    /// The frag button's grenade (LETHALS' index), carried at the frag count from now on. False when the
+    /// player's MW2 import lacks it (the frag stays).
+    pub fn set_lethal(&mut self, index: usize) -> bool {
+        let Some(&name) = LETHALS.get(index) else { return false };
+        if self.arsenal.offhand_id(name).is_none() {
+            return false;
+        }
+        self.lethal = index;
+        if let Some(g) = self.gunner.take() {
+            self.gunner = Some(g.with_frags(&self.arsenal, name, self.frags));
+        }
+        true
     }
 
     /// New spare-round scale or frag count (from the next fresh loadout on).
@@ -628,9 +687,10 @@ impl Arms {
         if let Some(g) = self.gunner.take() {
             let held = g.loadout().to_vec();
             if held == self.loadout {
+                let lethal = self.lethal_name();
                 self.gunner = Some(g.with_reserve_scale(&self.arsenal, self.ammo_scale).with_frags(
                     &self.arsenal,
-                    FRAG,
+                    lethal,
                     self.frags,
                 ));
             }
@@ -647,7 +707,10 @@ impl Arms {
         let Some(mut g) = self.gunner.take() else { return false };
         g.refill(&self.arsenal);
         if g.frags() < self.frags {
-            g = g.with_frags(&self.arsenal, FRAG, self.frags);
+            g = g.with_frags(&self.arsenal, self.lethal_name(), self.frags);
+        }
+        if g.tacticals().1 < TACTICAL_COUNT {
+            g = g.with_tacticals(&self.arsenal, self.tactical_name(), TACTICAL_COUNT);
         }
         self.gunner = Some(g);
         true
@@ -741,7 +804,10 @@ impl Arms {
         out.hud.damage_flash = damage_flash;
         match self.hand {
             Hand::Knife => copy_str(&mut out.hud.label, "KNIFE"),
-            Hand::Grenade => copy_str(&mut out.hud.label, &format!("FRAG x{}", f.frags)),
+            Hand::Grenade => copy_str(
+                &mut out.hud.label,
+                &format!("{} x{}", LETHAL_LABELS[self.lethal.min(LETHAL_LABELS.len() - 1)], f.frags),
+            ),
             Hand::Gun => {
                 if let Some(l) = f.weapon.checked_sub(1).and_then(|i| self.labels.get(i as usize)) {
                     copy_str(&mut out.hud.label, l);

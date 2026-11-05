@@ -11,6 +11,7 @@
 
 #include "d3d11_saved_state.h"
 #include "host_util.h"
+#include "mw2_input.h"
 
 #include <d3dcompiler.h>
 
@@ -38,6 +39,8 @@ cbuffer Frame : register(b0) {
     row_major float4x4 proj;
     float4 light;   // xyz: direction to the light (view space), w: intensity
     float4 params;  // x: ambient, y: sRGB target, z: alpha test, w: has normal map
+    float4 keep;    // GTA's HUD box the gun shows faintly through (pixels x0, y0, x1, y1; x1 <= x0: none)
+    float4 extra;   // x: an opaque surface (alpha 1), y: the box's soft edge (pixels), z: the gun's alpha inside it
 };
 cbuffer Bones : register(b1) { float4 rows[768]; };
 struct VSIn {
@@ -71,6 +74,12 @@ float3 Encode(float3 c) {
     c = saturate(c);
     return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;
 }
+// Under GTA's radar the gun fades to a ghost, so the map stays readable over it (softly at the edges).
+float KeepOut(float2 p) {
+    if (keep.z <= keep.x) return 1;
+    float d = min(min(p.x - keep.x, keep.z - p.x), min(p.y - keep.y, keep.w - p.y));
+    return lerp(1, extra.z, saturate(d / max(extra.y, 1)));
+}
 float4 PsMain(VSOut i, bool front : SV_IsFrontFace) : SV_Target {
     float4 albedo = colorMap.Sample(samp, i.uv);
     if (params.z > 0 && albedo.a < 0.5) discard;
@@ -89,7 +98,7 @@ float4 PsMain(VSOut i, bool front : SV_IsFrontFace) : SV_Target {
     float spec = pow(saturate(dot(reflect(-l, n), -v)), 24) * 0.25 * light.w;
     float3 c = albedo.rgb * (params.x * hemi + diffuse) + spec;
     if (params.y == 0) c = Encode(c);
-    return float4(c, albedo.a);
+    return float4(c, (extra.x > 0 ? 1 : albedo.a) * KeepOut(i.pos.xy));
 }
 )";
 
@@ -97,8 +106,12 @@ struct Constants {
     float proj[16];
     float light[4];
     float params[4];
+    float keep[4];
+    float extra[4];
 };
-static_assert(sizeof(Constants) == 96);
+static_assert(sizeof(Constants) == 128);
+// The gun under GTA's radar fades in over this many pixels from the box's edge (Frame::keepOutAlpha).
+constexpr float kKeepOutSoftPx = 24.0f;
 
 constexpr float kNear = 1.0f;    // inches: the view model sits a hand's width from the eye
 constexpr float kFar = 1000.0f;
@@ -142,7 +155,102 @@ struct Gpu {
     std::map<std::string, GpuTexture> textures;     // by name (colour and normal kept apart)
     DXGI_FORMAT loggedFormat = DXGI_FORMAT_UNKNOWN;
     bool failed = false;
+    // The scene's brightness behind the gun (SceneLight): small patches of the frame GTA drew, copied
+    // into a ring of CPU-readable textures and read a couple of frames later (no stall).
+    static constexpr int kProbes = 3;
+    ID3D11Texture2D* probe[kProbes] = {};
+    bool probeFull[kProbes] = {};
+    int probeNext = 0;
+    DXGI_FORMAT probeFormat = DXGI_FORMAT_UNKNOWN;
+    float scene = -1.0f; // smoothed, 0..1 (-1: not measured)
+    bool probeLogged = false;
+    ULONGLONG sceneLogAt = 0; // the log's line on the scene's light (every few seconds while it changes)
+    float sceneLogged = -1.0f;
 } gpu;
+
+// Each probe holds four patches of kPatchW x kPatchH side by side, from around where the gun sits.
+constexpr UINT kPatchW = 48, kPatchH = 32, kPatches = 4;
+constexpr float kPatchAt[kPatches][2] = {{0.62f, 0.72f}, {0.78f, 0.62f}, {0.55f, 0.88f}, {0.42f, 0.66f}};
+constexpr float kSceneSmooth = 0.06f; // per reading: over a few tenths of a second
+
+void ReleaseProbes() {
+    for (int i = 0; i < Gpu::kProbes; ++i) SafeRelease(gpu.probe[i]), gpu.probeFull[i] = false;
+    gpu.probeFormat = DXGI_FORMAT_UNKNOWN;
+    gpu.scene = -1.0f;
+}
+
+// The patches' mean brightness as displayed (0..1); `bgra`: the bytes are B, G, R, A.
+float PatchBrightness(const D3D11_MAPPED_SUBRESOURCE& m, DXGI_FORMAT f) {
+    const bool bgra = f == DXGI_FORMAT_B8G8R8A8_UNORM || f == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    const bool ten = f == DXGI_FORMAT_R10G10B10A2_UNORM;
+    double sum = 0.0;
+    for (UINT y = 0; y < kPatchH; ++y) {
+        const auto* row = static_cast<const std::uint8_t*>(m.pData) + static_cast<std::size_t>(y) * m.RowPitch;
+        for (UINT x = 0; x < kPatchW * kPatches; ++x) {
+            float r, g, b;
+            if (ten) {
+                std::uint32_t v;
+                std::memcpy(&v, row + x * 4, 4);
+                r = (v & 1023u) / 1023.0f, g = ((v >> 10) & 1023u) / 1023.0f, b = ((v >> 20) & 1023u) / 1023.0f;
+            } else {
+                const std::uint8_t* p = row + x * 4;
+                r = (bgra ? p[2] : p[0]) / 255.0f, g = p[1] / 255.0f, b = (bgra ? p[0] : p[2]) / 255.0f;
+            }
+            sum += 0.299 * r + 0.587 * g + 0.114 * b;
+        }
+    }
+    return static_cast<float>(sum / (kPatchW * kPatches * kPatchH));
+}
+
+// Reads the oldest probe (if the GPU is done with it) and copies this frame's patches into it.
+void ProbeScene(ID3D11Texture2D* backbuffer, const D3D11_TEXTURE2D_DESC& bd) {
+    const DXGI_FORMAT f = bd.Format;
+    const bool readable = bd.SampleDesc.Count == 1 && bd.Width >= 4 * kPatchW && bd.Height >= 4 * kPatchH &&
+                          (f == DXGI_FORMAT_B8G8R8A8_UNORM || f == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
+                           f == DXGI_FORMAT_R8G8B8A8_UNORM || f == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB ||
+                           f == DXGI_FORMAT_R10G10B10A2_UNORM);
+    if (!readable) {
+        if (!gpu.probeLogged) {
+            gpu.probeLogged = true;
+            Logf("CODV viewmodel: the scene's light cannot be read from this backbuffer (format %d, samples %u): "
+                 "the clock's light only", static_cast<int>(f), bd.SampleDesc.Count);
+        }
+        gpu.scene = -1.0f;
+        return;
+    }
+    if (f != gpu.probeFormat) {
+        ReleaseProbes();
+        D3D11_TEXTURE2D_DESC d{};
+        d.Width = kPatchW * kPatches, d.Height = kPatchH, d.MipLevels = 1, d.ArraySize = 1, d.Format = f;
+        d.SampleDesc.Count = 1, d.Usage = D3D11_USAGE_STAGING, d.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        for (int i = 0; i < Gpu::kProbes; ++i)
+            if (FAILED(gpu.device->CreateTexture2D(&d, nullptr, &gpu.probe[i]))) {
+                ReleaseProbes();
+                return;
+            }
+        gpu.probeFormat = f;
+    }
+    ID3D11DeviceContext* c = gpu.ctx;
+    const int slot = gpu.probeNext;
+    gpu.probeNext = (slot + 1) % Gpu::kProbes;
+    if (gpu.probeFull[slot]) {
+        D3D11_MAPPED_SUBRESOURCE m{};
+        const HRESULT hr = c->Map(gpu.probe[slot], 0, D3D11_MAP_READ, D3D11_MAP_FLAG_DO_NOT_WAIT, &m);
+        if (hr == DXGI_ERROR_WAS_STILL_DRAWING) return; // not ready: keep it, try next frame round
+        if (SUCCEEDED(hr)) {
+            const float v = PatchBrightness(m, f);
+            c->Unmap(gpu.probe[slot], 0);
+            gpu.scene = gpu.scene < 0.0f ? v : gpu.scene + (v - gpu.scene) * kSceneSmooth;
+        }
+    }
+    for (UINT i = 0; i < kPatches; ++i) {
+        const UINT x = std::min(static_cast<UINT>(kPatchAt[i][0] * bd.Width), bd.Width - kPatchW);
+        const UINT y = std::min(static_cast<UINT>(kPatchAt[i][1] * bd.Height), bd.Height - kPatchH);
+        const D3D11_BOX box{x, y, 0, x + kPatchW, y + kPatchH, 1};
+        c->CopySubresourceRegion(gpu.probe[slot], 0, i * kPatchW, 0, 0, backbuffer, 0, &box);
+    }
+    gpu.probeFull[slot] = true;
+}
 
 constexpr std::size_t kMeshCache = 8;
 
@@ -171,6 +279,7 @@ bool UseMesh(std::uint32_t id) {
 
 void ReleaseAll() {
     ReleaseMesh();
+    ReleaseProbes();
     for (auto& [name, t] : gpu.textures) SafeRelease(t.srv);
     gpu.textures.clear();
     SafeRelease(gpu.dsv);
@@ -499,6 +608,16 @@ bool Present(IDXGISwapChain* sc, const Frame& frame) {
         gpu.loggedFormat = bd.Format;
     }
     ID3D11DeviceContext* c = gpu.ctx;
+    // What GTA drew behind the gun, before the gun goes over it: its brightness lights the gun.
+    if (frame.scene) ProbeScene(backbuffer, bd);
+    const mw2input::Light lit =
+        mw2input::SceneLight(mw2input::Light{frame.light, frame.ambient}, frame.scene ? gpu.scene : -1.0f);
+    if (frame.scene && gpu.scene >= 0.0f && std::fabs(gpu.scene - gpu.sceneLogged) > 0.05f && GetTickCount64() - gpu.sceneLogAt > 5000) {
+        gpu.sceneLogAt = GetTickCount64();
+        gpu.sceneLogged = gpu.scene;
+        Logf("CODV viewmodel: scene brightness %.2f: light %.2f, ambient %.2f (clock %.2f / %.2f)", gpu.scene, lit.key,
+             lit.ambient, frame.light, frame.ambient);
+    }
     SavedState saved;
     saved.Save(c);
     bool drawn = false;
@@ -514,8 +633,8 @@ bool Present(IDXGISwapChain* sc, const Frame& frame) {
         k.light[0] = l[0] / len;
         k.light[1] = l[1] / len;
         k.light[2] = l[2] / len;
-        k.light[3] = frame.light;
-        k.params[0] = frame.ambient;
+        k.light[3] = lit.key;
+        k.params[0] = lit.ambient;
         k.params[1] = srgb ? 1.0f : 0.0f;
         c->ClearDepthStencilView(gpu.dsv, D3D11_CLEAR_DEPTH, 1.0f, 0);
         c->OMSetRenderTargets(1, &rtv, gpu.dsv);
@@ -537,9 +656,22 @@ bool Present(IDXGISwapChain* sc, const Frame& frame) {
         c->HSSetShader(nullptr, nullptr, 0);
         c->DSSetShader(nullptr, nullptr, 0);
         const float factor[4] = {0, 0, 0, 0};
+        // GTA's radar box (Frame::keepOut), in pixels: the gun shows only faintly there. With it, the opaque
+        // surfaces blend too (alpha 1 outside the box: as before).
+        const float* ko = frame.keepOut;
+        const bool keepOut = ko[2] > ko[0] && ko[3] > ko[1];
+        if (keepOut) {
+            const float W = static_cast<float>(bd.Width), H = static_cast<float>(bd.Height);
+            k.keep[0] = ko[0] * W, k.keep[1] = ko[1] * H, k.keep[2] = ko[2] * W, k.keep[3] = ko[3] * H;
+            // The box's edges at the screen's edges never fade (it runs off the screen there).
+            if (ko[0] <= 0.0f) k.keep[0] = -1e6f;
+            if (ko[3] >= 1.0f) k.keep[3] = 1e6f;
+        }
+        k.extra[1] = kKeepOutSoftPx, k.extra[2] = std::clamp(frame.keepOutAlpha, 0.0f, 1.0f);
         for (int pass = 0; pass < 2; ++pass) {
             const bool blendPass = pass == 1;
-            c->OMSetBlendState(blendPass ? gpu.blend : gpu.opaque, factor, 0xFFFFFFFFu);
+            k.extra[0] = blendPass ? 0.0f : 1.0f;
+            c->OMSetBlendState(blendPass || keepOut ? gpu.blend : gpu.opaque, factor, 0xFFFFFFFFu);
             c->OMSetDepthStencilState(blendPass ? gpu.depthTest : gpu.depthWrite, 0);
             for (const Draw& d : mesh.draws) {
                 if (((d.flags & CV_VM_DRAW_BLEND) != 0) != blendPass || d.count == 0) continue;

@@ -1,5 +1,7 @@
 #include "mw2_driver.h"
 
+#include "pad.h"
+
 #include <cstdarg>
 #include <cstring>
 
@@ -56,6 +58,9 @@ constexpr float kVehicleReach = 4.0f, kVehicleCentre = 3.5f, kVehicleCone = 0.6f
 // player to GTA for a moment (MW2's view and HUD stay), long enough for its ladder logic to take it; again
 // after kProbeAgain. The enter key does the same anywhere without a vehicle (the top of a ladder).
 constexpr DWORD kPushTime = 500, kProbeAgain = 3000, kAutoWindow = 700, kEnterWindow = 1500;
+// The C key held this long, standing still right at a ladder: climb it.
+constexpr DWORD kDuckLadderMs = 700, kDuckLadderAgain = 1500;
+constexpr float kDuckLadderStill = 0.5f; // m/s
 // Facing a wall, GTA's ladder task (it climbs up only, ignoring the player) if GTA mounted none by then.
 constexpr DWORD kTaskFallback = 350;
 constexpr float kPushSpeed = 0.4f; // metres per second: blocked
@@ -147,6 +152,29 @@ bool TallWallAhead(Ped player) {
         if (len < 0.5f || (normal.x * fx + normal.y * fy) / len > -kHeadOn) return false;
     }
     return true;
+}
+
+// The crouch-key ladder's test: something solid (not a vehicle or a ped) right ahead at the knees, the
+// chest or above the head, within kDuckLadderReach. A ladder's rungs leave gaps, so one ray is enough;
+// GTA itself then decides whether there is a ladder to climb. Returns how many rays hit (logged).
+constexpr float kDuckLadderReach = 0.8f;
+int LadderRungsAhead(Ped player) {
+    const Vector3 p = Call<Vector3>(gta::GET_ENTITY_COORDS, player, TRUE);
+    const float h = Call<float>(gta::GET_ENTITY_HEADING, player) * 3.14159265f / 180.0f;
+    const float fx = -std::sin(h), fy = std::cos(h);
+    int hits = 0;
+    for (const float dz : {-0.5f, 0.0f, 0.4f, 0.9f, 1.3f}) {
+        const int handle = Call<int>(gta::START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE, p.x, p.y, p.z + dz,
+                                     p.x + fx * kDuckLadderReach, p.y + fy * kDuckLadderReach, p.z + dz, 1 | 16, player, 7);
+        BOOL hit = FALSE;
+        Vector3 end{}, normal{};
+        Entity entity = 0;
+        Call<int>(gta::GET_SHAPE_TEST_RESULT, handle, &hit, &end, &normal, &entity);
+        if (!hit) continue;
+        if (entity && (Call<BOOL>(gta::IS_ENTITY_A_VEHICLE, entity) || Call<BOOL>(gta::IS_ENTITY_A_PED, entity))) continue;
+        ++hits;
+    }
+    return hits;
 }
 
 // A drop of kLadderDrop or more just ahead of the feet (the top of a ladder, or of anything high).
@@ -499,6 +527,8 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
     r.reload = Pressed(kReload), r.melee = r.mouse ? fTap_ : Pressed(kLookBehind);
     // MW2's frag: G on the keyboard, RB (GTA's cover button) on a pad.
     r.frag = Pressed(r.mouse ? input::kThrowGrenade : controls::kCover);
+    // MW2's special grenade: T on the keyboard (GTA's chat key, unused in story mode), D-pad left on a pad.
+    r.smoke = r.mouse ? Pressed(input::kTacticalKey) : (padButtons_ & pad::kDpadLeft) != 0;
     // CODV's lean: Q / E on the keyboard (GTA's cover and context keys; MW2 mode takes them).
     if (r.mouse) r.leanLeft = Pressed(controls::kCover), r.leanRight = Pressed(ksrules::kContext);
     if (s.numberKeys)
@@ -541,10 +571,31 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
                     n += std::snprintf(line + n, sizeof(line) - n, "(%.2f 0x%08X)", a.dist, a.model);
             }
             util::Logf(log_, "%s", line);
+            if (const std::string why = runtime_.BlockedWhy(static_cast<float>(in.forward), static_cast<float>(in.right)); !why.empty())
+                util::Logf(log_, "CODV:   %s", why.c_str());
             Note(now, "HELD still pushing forward (see GTA ahead)");
         }
     } else {
         stuckSince_ = 0;
+    }
+    // A ladder by the C key only (keyboard, GTA's look-behind; the knife is on F): held a moment, standing
+    // still on the ground right at a ladder (something solid within 0.8 m ahead), GTA takes the player to
+    // climb it, as the use key does. Not while C is the view key (ThirdPersonKey=1). Crouch never climbs.
+    const bool cHeld = r.mouse && !s.thirdPersonKey && Call<BOOL>(gta::IS_DISABLED_CONTROL_PRESSED, 0, kLookBehind);
+    if (active_ && cHeld && (last_.flags & CV_MOVE_ON_GROUND) && !(last_.flags & CV_MOVE_MANTLING) && speed < kDuckLadderStill) {
+        if (!duckSince_) duckSince_ = now;
+        if (now - duckSince_ >= kDuckLadderMs && now - ladderProbeAt_ >= kDuckLadderAgain) {
+            duckSince_ = 0;
+            ladderProbeAt_ = now;
+            const int rungs = LadderRungsAhead(player);
+            if (rungs > 0) {
+                TryLadder(now, kEnterWindow, true, "C held at a ladder");
+            } else {
+                util::Logf(log_, "CODV: ladder: C held, nothing within %.1f m ahead", kDuckLadderReach);
+            }
+        }
+    } else {
+        duckSince_ = 0;
     }
     // Diagnostics: any push (forward, back, sideways, a jump) that has not moved the player 10 cm in 1.5 s
     // is logged with MW2's state (on the ground or not, waiting for the map, the stance, the fall speed) and
@@ -576,6 +627,8 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
                     n += std::snprintf(line + n, sizeof(line) - n, "(%.2f 0x%08X)", a.dist, a.model);
             }
             util::Logf(log_, "%s", line);
+            if (const std::string why = runtime_.BlockedWhy(static_cast<float>(in.forward), static_cast<float>(in.right)); !why.empty())
+                util::Logf(log_, "CODV:   %s", why.c_str());
             Note(now, "NOT MOVING %s (see the log)", (f & CV_MOVE_ON_GROUND) ? "on the ground" : "in the air");
         }
     } else {

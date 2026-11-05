@@ -15,6 +15,7 @@
 //            (the third-person camera is then C on the keyboard, Back on a pad)
 //   weapon   INPUT_SELECT_WEAPON (37) / wheel next (14, 15) / pad Y (cycle) -> weapon_request
 //   frag     INPUT_THROW_GRENADE (58) / pad INPUT_COVER (44)  G / RB  -> FRAG (hold cooks, release throws)
+//   special  INPUT_MP_TEXT_CHAT_ALL (245, unused in story mode) / pad D-pad left  T / D-pad left  -> SMOKE
 //   slots    keys 1 / 2 / 3 / 5 (NumberKeys=1): primary / secondary / sniper / launcher (CS-style)
 //   lean     Q / E held (INPUT_COVER 44 / INPUT_CONTEXT 51, keyboard and mouse) -> CODV's LEAN_LEFT / RIGHT;
 //            on a pad, L3 held with the left stick pushed left / right (no strafe, no crouch then)
@@ -38,7 +39,7 @@ struct Raw {
     float lookX = 0.0f, lookY = 0.0f;  // GTA normals: x right +, y down +
     bool mouse = true;                 // keyboard and mouse (else pad)
     bool sprint = false, jump = false, duck = false, ads = false, attack = false;
-    bool reload = false, melee = false, frag = false;
+    bool reload = false, melee = false, frag = false, smoke = false; // smoke: the special grenade (T)
     bool nextWeapon = false; // a press this frame (an edge, not held)
     bool leanLeft = false, leanRight = false; // held
     int slot = 0;            // slot picked this frame: 1 primary, 2 secondary, 3 sniper, 4 launcher (0 none)
@@ -153,6 +154,7 @@ public:
         if (r.reload) b |= CV_MW2_RELOAD;
         if (r.melee) b |= CV_MW2_MELEE;
         if (r.frag) b |= CV_MW2_FRAG;
+        if (r.smoke) b |= CV_MW2_SMOKE;
         if (stance_ == Stance::Crouch) b |= CV_MW2_CROUCH;
         if (stance_ == Stance::Prone) b |= CV_MW2_PRONE;
         // Both held: upright.
@@ -213,10 +215,33 @@ inline Light ViewmodelLight(int hours, int minutes, bool interior) {
     if (h < 5.0f || h > 21.0f) day = 0.0f;
     else if (h < 7.0f) day = (h - 5.0f) / 2.0f;
     else if (h > 19.0f) day = (21.0f - h) / 2.0f;
+    // Linear light (the shader encodes to the screen afterwards): the night must be far lower than it
+    // looks, or the gun only dims by a third on screen.
     Light l;
-    l.key = 0.3f + 0.7f * day;
-    l.ambient = 0.2f + 0.15f * day;
-    if (interior) l.key *= 0.6f, l.ambient = std::max(l.ambient, 0.3f);
+    l.key = 0.1f + 0.9f * day;
+    l.ambient = 0.06f + 0.29f * day;
+    if (interior) l.key *= 0.6f, l.ambient = std::max(l.ambient, 0.2f);
+    return l;
+}
+
+// The view model's light from what GTA drew around it this frame: `scene` is the mean brightness (0..1,
+// as displayed) of the frame behind the gun. The gun follows it on screen: the scene's brightness over a
+// daylit street's (kSceneRef), taken to linear light (the shader's space), scales a full day's light. A
+// dark alley or a night street darkens the hands and gun as much as GTA's picture, a lit tunnel or a sunny
+// street brightens them; the clock's light keeps a small share, so a white wall or a black car right ahead
+// never swings it all the way. `scene` below 0: not measured.
+inline constexpr float kSceneRef = 0.4f, kSceneGamma = 1.8f, kSceneShare = 0.85f;
+inline constexpr float kSceneMin = 0.04f, kSceneMax = 1.3f;
+inline float SceneScale(float scene) {
+    const float s = std::clamp(scene, 0.0f, 1.0f) / kSceneRef;
+    return std::clamp(std::pow(s, kSceneGamma), kSceneMin, kSceneMax);
+}
+inline Light SceneLight(const Light& clock, float scene) {
+    if (scene < 0.0f) return clock;
+    const float f = SceneScale(scene);
+    Light l;
+    l.key = clock.key + (1.0f * f - clock.key) * kSceneShare;
+    l.ambient = clock.ambient + (0.35f * f - clock.ambient) * kSceneShare;
     return l;
 }
 

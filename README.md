@@ -92,6 +92,14 @@ every hostile kill. The Stinger locks on to aircraft (up to 2500 m) and the Jave
 over its target and dives on top); a locked missile flies about 3 km and goes off near its target, so aircraft
 crossing the sky come down (`Mw2Missiles`). The RPG-7, the AT4 and the Thumper fire straight.
 
+**Explosives.** G (RB) throws what you pick in the menu (`Lethal`), with MW2's own animation and HUD icon:
+the frag; the Semtex, which sticks to whatever it hits, a car or a person included, and goes off two seconds
+later; the C4, which sticks where it lands until key 6 or a double tap of R sets them all off, even from a car;
+or the Claymore, put down ahead of you, its red lasers watching for a hostile to walk in;
+or the throwing knife, one hit to kill, silent.
+T throws MW2's special grenade (`Tactical`, two carried): the flashbang (the hostiles who see it cower, blinded,
+and your own screen goes white if you look at it), the stun (shorter) or the smoke (a cloud to get away in).
+
 **View, body and sound.** MW2's first-person arms and guns, animated by MW2's own animation code (raise, fire,
 aim, reload, sprint, melee, with MW2's bob, sway and kick). In third person your GTA character keeps its look
 and moves with MW2's animations. Weapon sounds are MW2's, played inside GTA's own audio, so GTA's volume
@@ -116,7 +124,7 @@ in the top one. All ten are in play by default, one per kill count in one life:
 | 22 | **AC-130**: 40 s on the gunship's guns, with MW2's HUD |
 | 26 | **Chopper Gunner**: 40 s on the helicopter's turret, with MW2's HUD |
 | 30 | **EMP**: the city's lights out, engines dead and aircraft down near you for 60 s |
-| 35 | **Tactical Nuke**: MW2's countdown and blast, then a long aftermath (orange sky, smoke, empty streets); you survive (`NukeKillsPlayer=1`: MW2's rule, it takes you too) |
+| 35 | **Tactical Nuke**: MW2's countdown and blast, then a long aftermath (orange sky, smoke, empty streets, no police sent for 30 s); you survive (`NukeKillsPlayer=1`: MW2's rule, it takes you too) |
 
 The streak counts per life, and rewards you have not used are lost when you die (`KeepKillstreaksOnDeath=1`
 keeps them). The Tactical Nuke ends the run: its blast's kills count, then the streak starts over from zero and the
@@ -126,7 +134,7 @@ uses MW2's rule of three picks (`Killstreak1..3`). Killstreaks stay off in story
 wanted level.
 
 **Police Juggernauts.** In Free Roam, at four stars a Juggernaut may join the police hunting you, and at five
-up to three at once (one that dies may be replaced after 45 s, 1:15 or 1:45, at random; none while the stars flash): heavy armour, a heavy machine gun, much more health, no head shot kill and a slow, steady advance
+up to three, minutes apart (the next at least 1:30 to 2:30 after one joins, 45 s to 1:45 after one dies; none while the stars flash): heavy armour, a heavy machine gun, much more health, no head shot kill and a slow, steady advance
 (a bigger orange dot on the radar). His entrance plays as a short cinematic in three cuts and his death in slow
 motion, and you cannot be hurt while they play. The menu's Game section turns them (or just the cinematics)
 off, and "Test: spawn a Juggernaut" puts one in front of you, handy for recording.
@@ -141,10 +149,10 @@ switch and six sections (right / A / Enter opens one, B / Backspace goes back):
 
 | Section | Settings |
 |---|---|
-| Weapons | weapon sets, random guns, primary / secondary, Stinger / Javelin missiles, spare ammo, frags, Scavenger, number keys, recoil, shots (below), weapon volume |
+| Weapons | weapon sets, random guns, primary / secondary, Stinger / Javelin missiles, spare ammo, grenades carried, lethal (frag / Semtex / C4 / Claymore / throwing knife), tactical (flashbang / stun / smoke), Scavenger, number keys, recoil, damage, shots (below), weapon volume |
 | Movement | reload while sprinting, MW2 movement, mouse sensitivity, invert look, field of view, third person, sprint speed and time, jump height, MW2's jump slowdown, fall damage, smooth collision, quick jump, forced first person |
 | Parkour | slide (speed, length), dive, auto vault (from what height), mantle speed, high climb (up to what height), movement sounds |
-| HUD | MW2's HUD, stamina bar, crosshair, hitmarker, hit sounds, body animation, debug overlay |
+| HUD | MW2's HUD, stamina bar, crosshair, hitmarker, hit sounds, gun lighting, gun over radar, body animation, debug overlay |
 | Killstreaks | killstreaks on / off, all ten or three picks, the three rewards, the EMP's kill count |
 | Game | regenerating health, starting with CODV on, missions, police Juggernauts |
 
@@ -188,7 +196,7 @@ separately. ScriptHookV is left untouched.
 ## Known limitations
 
 - Small hitches remain in some movement cases (car corners, low fences); tuning continues.
-- CODV's own missiles have no in-flight sound yet.
+- GTA's phone shows under MW2's HUD and gun.
 - The RPG-7's rocket shows on the launcher only after the setup has imported MW2 with this version.
 - GTA V Enhanced, GTA Online and FiveM are not supported.
 - Now and then a rifle-armed NPC (SWAT, soldiers) fires a burst at a minigun's rate and can take most of your

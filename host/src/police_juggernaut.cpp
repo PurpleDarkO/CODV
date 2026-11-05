@@ -143,7 +143,12 @@ void Squad::Tick(RuntimeBridge& runtime, Ped player, bool active, float viewHead
         Unit& u = units_[i];
         bool drop = !Call<BOOL>(gta::DOES_ENTITY_EXIST, u.ped);
         const bool died = !drop && Call<BOOL>(gta::IS_PED_DEAD_OR_DYING, u.ped, TRUE);
-        if (died && !u.released && cinematics && !dead && cine_ != Cine::Intro) StartCinematic(Cine::Death, u.ped, player);
+        if (died && !u.released) {
+            const bool cine = cinematics && !dead && cine_ != Cine::Intro;
+            downMinigun_ = u.minigun;
+            if (cine) StartCinematic(Cine::Death, u.ped, player);
+            else Down(); // no cinematic: the notice at once
+        }
         if (died) {
             if (!u.released) Release(u);
             drop = true;
@@ -173,9 +178,9 @@ void Squad::Tick(RuntimeBridge& runtime, Ped player, bool active, float viewHead
         }
     }
 
-    // The stars flashing (the police lost sight and search): none comes, and a roll already won is off.
-    // A Juggernaut is sent to a chase, not to a search about to give up.
-    if (stars > 0 && !dead && Call<BOOL>(gta::ARE_PLAYER_STARS_GREYED_OUT, Call<Player>(gta::PLAYER_ID))) {
+    // The stars flashing (the police lost sight and search), or no police sent after a nuke: none comes,
+    // and a roll already won is off. A Juggernaut is sent to a chase, not to a search about to give up.
+    if (stars > 0 && !dead && (grace_ || Call<BOOL>(gta::ARE_PLAYER_STARS_GREYED_OUT, Call<Player>(gta::PLAYER_ID)))) {
         rolled_ = false;
         if (static_cast<int>(now + kCheckMs / 2 - nextCheck_) > 0) nextCheck_ = now + kCheckMs / 2;
         return;
@@ -207,6 +212,8 @@ void Squad::Tick(RuntimeBridge& runtime, Ped player, bool active, float viewHead
     if (!rolled_) return;
     if (const Ped j = Spawn(player, viewHeading, false, Rand01() < kMinigunChance)) {
         rolled_ = false;
+        // The next one well apart from this one (five stars: up to three, but spread over minutes).
+        nextCheck_ = now + AfterSpawnMs(Rand01());
         util::Logf(log, "CODV: a police Juggernaut%s joins the chase (%d stars)", units_.back().minigun ? " with a minigun" : "",
                    stars);
         if (cinematics && cine_ == Cine::None) StartCinematic(Cine::Intro, j, player);
@@ -312,13 +319,9 @@ void Squad::StartCinematic(Cine kind, Ped target, Ped player) {
     cine_ = kind;
     cineTarget_ = target;
     cinePlayer_ = player;
-    // His entrance has no words (the cuts say it); his death gets MW2's killstreak splash (MW2's fonts
-    // and glow), GTA's text without MW2's HUD.
-    splashed_ = false;
-    if (kind == Cine::Death) {
-        static constexpr float kRed[4] = {0.9f, 0.15f, 0.1f, 1.0f};
-        splashed_ = mw2Hud_ && runtime_ && runtime_->Splash("JUGGERNAUT DOWN", "Enemy Juggernaut killed", kRed);
-    }
+    // His entrance has no words (the cuts say it); his death says it once the cinematic is over, over the
+    // score bar (Down); without MW2's HUD, GTA's text in the cinematic.
+    splashed_ = mw2Hud_;
     // The entrance: he stops for a pose, a new one at random each time (played as soon as it is loaded).
     if (kind == Cine::Intro) {
         const int last = pose_;
@@ -420,8 +423,19 @@ void Squad::PlayPose(DWORD t) {
     posed_ = true;
 }
 
+// "JUGGERNAUT DOWN" over the score bar's bars (MW2's fonts), else MW2's killstreak splash, else nothing (GTA's
+// text had the cinematic).
+void Squad::Down() {
+    const char* line = downMinigun_ ? "Minigun Juggernaut killed" : "Enemy Juggernaut killed";
+    if (!mw2Hud_ || !runtime_) return;
+    if (runtime_->BoardNotice("JUGGERNAUT DOWN", line, kDownNoticeMs)) return;
+    static constexpr float kRed[4] = {0.9f, 0.15f, 0.1f, 1.0f};
+    runtime_->Splash("JUGGERNAUT DOWN", line, kRed);
+}
+
 void Squad::EndCinematic() {
     if (cine_ == Cine::None) return;
+    if (cine_ == Cine::Death) Down();
     if (cine_ == Cine::Intro && !posed_ && log_)
         util::Logf(log_, "CODV: Juggernaut pose %s: its animations did not load in time", kPoses[pose_].clip);
     // After his entrance: on the player at once, and another pose next time.

@@ -158,6 +158,9 @@ struct Voice {
     /// Output frames still to wait before it starts.
     delay: u64,
     looping: bool,
+    /// The host's handle (0: none) and its level over `gain` (a missile's loop, louder as it nears).
+    tag: u32,
+    level: f32,
 }
 
 /// The variant's PCM, by file name (loads it on first use).
@@ -244,6 +247,36 @@ impl Mixer {
         self.play_linked(aliases, src, name, 0, 0, scale)
     }
 
+    /// Starts `name` looped until `set_level(tag, 0)`, at `level`: the voices it starts carry `tag`.
+    pub fn play_loop(&mut self, aliases: &Aliases, src: &mut dyn Source, name: &str, tag: u32, level: f32) -> usize {
+        let started = self.play_linked(aliases, src, name, 0, 0, [1.0, 1.0]);
+        let n = self.voices.len();
+        for v in &mut self.voices[n - started.min(n)..] {
+            v.tag = tag;
+            v.level = level.clamp(0.0, 4.0);
+            v.looping = true;
+        }
+        started
+    }
+
+    /// The level of `tag`'s voices (0 or less: they stop). Returns the voices it reached.
+    pub fn set_level(&mut self, tag: u32, level: f32) -> usize {
+        if tag == 0 {
+            return 0;
+        }
+        let before = self.voices.len();
+        if level <= 0.0 {
+            self.voices.retain(|v| v.tag != tag);
+            return before - self.voices.len();
+        }
+        let mut reached = 0;
+        for v in self.voices.iter_mut().filter(|v| v.tag == tag) {
+            v.level = level.min(4.0);
+            reached += 1;
+        }
+        reached
+    }
+
     fn play_linked(
         &mut self,
         aliases: &Aliases,
@@ -268,7 +301,7 @@ impl Mixer {
                 self.voices.remove(0);
             }
             let looping = v.flags & FLAG_LOOPING != 0 && v.chain.is_empty();
-            self.voices.push(Voice { pcm, pos: 0.0, step, gain, delay: start, looping });
+            self.voices.push(Voice { pcm, pos: 0.0, step, gain, delay: start, looping, tag: 0, level: 1.0 });
             started += 1;
             if !looping {
                 started += self.play_linked(aliases, src, &v.chain, start + length, depth + 1, scale);
@@ -296,7 +329,7 @@ impl Mixer {
                 let frac = (v.pos - i as f64) as f32;
                 let a = f32::from(v.pcm.samples[i]);
                 let b = f32::from(v.pcm.samples[(i + 1).min(n - 1)]);
-                *o += (a + (b - a) * frac) * v.gain * scale;
+                *o += (a + (b - a) * frac) * v.gain * v.level * scale;
                 v.pos += v.step;
             }
         }
@@ -424,6 +457,8 @@ pub struct Audio {
     raised: HashSet<u32>,
     preloaded: HashSet<String>,
     reported: usize,
+    /// The last loop handle given out.
+    next_tag: u32,
 }
 
 impl Audio {
@@ -460,11 +495,24 @@ impl Audio {
             raised: HashSet::new(),
             preloaded: HashSet::new(),
             reported: 0,
+            next_tag: 0,
         }
     }
 
     pub fn play(&mut self, name: &str) -> usize {
         self.mixer.play(&self.aliases, &mut self.files, name, 0)
+    }
+
+    /// Starts `name` looped at `level`; returns its handle for `level` (0: not imported).
+    pub fn play_loop(&mut self, name: &str, level: f32) -> u32 {
+        self.next_tag = self.next_tag.wrapping_add(1).max(1);
+        let tag = self.next_tag;
+        if self.mixer.play_loop(&self.aliases, &mut self.files, name, tag, level) > 0 { tag } else { 0 }
+    }
+
+    /// A loop's level (0: it stops).
+    pub fn level(&mut self, tag: u32, level: f32) -> usize {
+        self.mixer.set_level(tag, level)
     }
 
     /// A movement sound at `gain` of its alias's volume, varied: up to 20 % quieter and 5 % off in

@@ -27,6 +27,9 @@ use hud_iw4 as h;
 use std::path::Path;
 
 mod feedback;
+mod hosttext;
+pub use hosttext::HostLine;
+pub use scorebar::HostBoard;
 mod javelin;
 mod scorebar;
 mod streaks;
@@ -62,6 +65,9 @@ pub struct Weapon<'a> {
     pub row: Option<&'a Row>,
     /// The frag's HUD icon image ("" none).
     pub frag_icon: String,
+    /// The smoke button's special grenade: its icon and how many are left (drawn beside the frag's).
+    pub tactical_icon: String,
+    pub tacticals: i32,
 }
 
 /// The host's view of the frame.
@@ -116,6 +122,8 @@ const SCAVENGER_FADE_MS: i32 = 2500;
 
 const OD_STOCK: i32 = 119;
 const OD_FRAG: i32 = 103;
+/// The space between the frag's icon and the special grenade's to its left (virtual units).
+const TACTICAL_ICON_GAP: f32 = 4.0;
 const OD_CLIP: i32 = 117;
 const OD_WEAPON_NAME: i32 = 81;
 const OD_LOW_AMMO: i32 = 120;
@@ -152,6 +160,13 @@ pub struct Mw2Hud {
     pub streak_view: streaks::StreakView,
     /// When MW2's Scavenger last topped up the guns (its pickup icon fades over 2.5 s).
     scavenger_time: Option<i32>,
+    /// The host's own lines in MW2's fonts (a game mode's wave and time), as last sent, and when.
+    host_lines: Vec<hosttext::HostLine>,
+    host_lines_at: i32,
+    /// A game mode's own count in the score bar (its kills, its wave, what is left), as last sent, and when.
+    host_board: Option<(scorebar::HostBoard, i32)>,
+    /// A timed notice over the score bar's bars (a Juggernaut down): title, line, until (HUD ms).
+    board_notice: Option<(String, String, i32)>,
     /// CODV's sprint meter under the crosshair (MW2 has none): shown while it is not full.
     pub stamina_bar: bool,
     /// Since when the meter is full (it fades out then).
@@ -171,8 +186,9 @@ pub struct Mw2Hud {
 }
 
 /// The sprint meter: segments under the weapon bar's line (virtual units from the bottom right,
-/// as the weapon bar's items), fading out once full.
-const STAMINA_RECT: [f32; 4] = [-232.0, -46.0, 120.0, 2.5];
+/// as the weapon bar's items), fading out once full. It ends short of the grenade icons (the special
+/// grenade's sits left of the frag's, from x -131).
+const STAMINA_RECT: [f32; 4] = [-232.0, -46.0, 96.0, 2.5];
 const STAMINA_SEGMENTS: usize = 20;
 const STAMINA_FADE_MS: i32 = 600;
 
@@ -214,6 +230,10 @@ impl Mw2Hud {
             key_label: "4".into(),
             streak_view: streaks::StreakView::default(),
             scavenger_time: None,
+            host_lines: Vec::new(),
+            host_lines_at: i32::MIN,
+            host_board: None,
+            board_notice: None,
             stamina_bar: true,
             stamina_full: None,
             vehicle_reticle: None,
@@ -364,6 +384,7 @@ impl Mw2Hud {
         }
         self.scorebar(&mut out, &sp);
         self.round_over(&mut out, &sp);
+        self.host_text(&mut out, &sp);
         self.hit_marker(&mut out, &sp);
         self.scavenger_icon(&mut out, &sp);
         // The sprint meter and the cues pointed by MW2's view (its yaw stands still in a vehicle).
@@ -493,6 +514,17 @@ impl Mw2Hud {
                 "clipAmmo" => f.clip as f32,
                 _ => 1.0,
             };
+            // MW2 stacks the grenade icons, one item per grenade carried (each shown from its count up): the
+            // special grenade's stack, to the left, follows its own count, not the lethal's.
+            if item.owner_draw == OD_FRAG
+                && weapon.tacticals > 0
+                && item.visible.as_ref().is_none_or(|t| t.variable != "fragAmmo" || t.passes(weapon.tacticals as f32))
+                && let Some(img) = self.image(&weapon.tactical_icon)
+            {
+                let mut rect = item.rect;
+                rect[0] -= rect[2] + TACTICAL_ICON_GAP;
+                out.push(pic(sp, img, rect, item.align, item.color));
+            }
             if let Some(t) = &item.visible
                 && !t.passes(value(&t.variable))
             {
@@ -1067,7 +1099,13 @@ mod tests {
         let player = Mw2Player::new([0.0; 3], 0.0);
         let frame = GunFrame { weapon: 3, clip: 1, stock: 2, ..Default::default() };
         let r = row();
-        let w = Weapon { frame: Some(&frame), row: Some(&r), frag_icon: String::new() };
+        let w = Weapon {
+            frame: Some(&frame),
+            row: Some(&r),
+            frag_icon: String::new(),
+            tactical_icon: String::new(),
+            tacticals: 0,
+        };
         let clu = |lock| View {
             javelin: Some(Clu { lock, at: [1200.0, 400.0], has_rocket: true, too_close: false }),
             ..view()
@@ -1163,7 +1201,13 @@ mod tests {
         let player = Mw2Player::new([0.0; 3], 0.0);
         let frame = GunFrame { weapon: 3, clip: 20, stock: 60, ..Default::default() };
         let r = row();
-        let w = Weapon { frame: Some(&frame), row: Some(&r), frag_icon: String::new() };
+        let w = Weapon {
+            frame: Some(&frame),
+            row: Some(&r),
+            frag_icon: String::new(),
+            tactical_icon: String::new(),
+            tacticals: 0,
+        };
         let on_foot = hud.draw(&player, &w, view(), &[]);
         assert_eq!(images(&hud, &on_foot, "hud_weaponbar"), 1);
         assert_eq!(images(&hud, &on_foot, "hud_scorebar"), 1);
@@ -1206,7 +1250,13 @@ mod tests {
         let player = Mw2Player::new([0.0; 3], 0.0);
         let frame = GunFrame { weapon: 3, clip: 20, stock: 60, ..Default::default() };
         let r = row();
-        let w = Weapon { frame: Some(&frame), row: Some(&r), frag_icon: String::new() };
+        let w = Weapon {
+            frame: Some(&frame),
+            row: Some(&r),
+            frag_icon: String::new(),
+            tactical_icon: String::new(),
+            tacticals: 0,
+        };
         let q = hud.draw(&player, &w, view(), &[]);
         assert_eq!(images(&hud, &q, "hud_weaponbar"), 1);
         // 30 rounds, 20 full: bottom right, right to left.
@@ -1425,7 +1475,13 @@ mod preview {
         let mut hud = Mw2Hud::new(data);
         let player = Mw2Player::new([0.0; 3], 120.0);
         let frame = GunFrame { weapon: 7, clip: 7, stock: 180, frags: 2, ..Default::default() };
-        let w = Weapon { frame: Some(&frame), row: Some(&row), frag_icon: frag };
+        let w = Weapon {
+            frame: Some(&frame),
+            row: Some(&row),
+            frag_icon: frag,
+            tactical_icon: String::new(),
+            tacticals: 0,
+        };
         hud.hits(1, 0);
         hud.damaged(135.0, false);
         if let Ok(kind) = std::env::var("CODV_HUD_VIEW") {

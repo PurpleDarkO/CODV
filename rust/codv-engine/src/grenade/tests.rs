@@ -3,6 +3,7 @@ use crate::world::{BoxWorld, SolidBox};
 
 fn frag() -> Throw {
     Throw {
+        kind: crate::arms::ThrowKind::Frag,
         offhand_class: 1,
         hold_fire_time_ms: 600,
         fuse_time_ms: 3500,
@@ -73,4 +74,61 @@ fn a_cooked_frag_keeps_only_what_is_left_and_walls_send_it_back() {
     assert!(g.origin[0] < 200.0, "stopped by the wall: {:?}", g.origin);
     g.shift([10.0, 0.0, 0.0]);
     assert!(g.origin[0] < 210.0);
+}
+
+#[test]
+fn a_semtex_sticks_to_the_wall_it_hits_and_goes_off_after_its_fuse() {
+    let mut world = BoxWorld::floor(0.0, 20000.0);
+    world.add(SolidBox { mins: [200.0, -500.0, 0.0], maxs: [240.0, 500.0, 500.0] });
+    let t = Throw { kind: crate::arms::ThrowKind::Sticky, cook_off_hold: false, fuse_time_ms: 2000, ..frag() };
+    let mut g = Grenade::thrown(3, 9, t, [0.0, 0.0, 60.0], [0.0, 0.0, 0.0], [0.0; 3], None);
+    let mut stuck_at = None;
+    let mut boom = None;
+    for i in 0..400 {
+        boom = g.step(16, &world);
+        if g.stuck && stuck_at.is_none() {
+            stuck_at = Some(i * 16);
+        }
+        if boom.is_some() {
+            break;
+        }
+    }
+    let at = stuck_at.expect("it stuck");
+    assert!(g.origin[0] < 200.0 && g.origin[0] > 190.0 && g.origin[2] > 20.0, "on the wall's face: {:?}", g.origin);
+    assert!(boom.is_some(), "it went off");
+    assert!(at < 400, "stuck at once: {at} ms");
+}
+
+#[test]
+fn a_c4_a_claymore_or_a_knife_lands_for_the_host_and_never_goes_off_here() {
+    let world = BoxWorld::floor(0.0, 20000.0);
+    for kind in [crate::arms::ThrowKind::Charge, crate::arms::ThrowKind::Mine, crate::arms::ThrowKind::Knife] {
+        let speed = if kind == crate::arms::ThrowKind::Mine { 0.0 } else { 600.0 };
+        let t = Throw { kind, cook_off_hold: false, speed, ..frag() };
+        let mut g = Grenade::thrown(4, 9, t, [0.0, 0.0, 60.0], [0.0, 0.0, 0.0], [0.0; 3], None);
+        for _ in 0..300 {
+            assert!(g.step(16, &world).is_none(), "{kind:?} never goes off by itself");
+            if g.landed {
+                break;
+            }
+        }
+        assert!(g.landed && g.origin[2] < 5.0, "{kind:?} on the floor: {:?}", g.origin);
+    }
+}
+
+#[test]
+fn a_knife_thrown_from_inside_something_still_flies_out() {
+    // The eye inside a box (the thrower's own space): the knife goes on and sticks in the far wall.
+    let mut world = BoxWorld::floor(-1000.0, 20000.0);
+    world.add(SolidBox { mins: [-10.0, -10.0, 50.0], maxs: [10.0, 10.0, 70.0] });
+    world.add(SolidBox { mins: [400.0, -500.0, -1000.0], maxs: [440.0, 500.0, 500.0] });
+    let t = Throw { kind: crate::arms::ThrowKind::Knife, cook_off_hold: false, speed: 1400.0, ..frag() };
+    let mut g = Grenade::thrown(5, 9, t, [0.0, 0.0, 60.0], [0.0, 0.0, 0.0], [0.0; 3], None);
+    for _ in 0..100 {
+        g.step(16, &world);
+        if g.landed {
+            break;
+        }
+    }
+    assert!(g.landed && g.origin[0] > 390.0, "stuck in the far wall, not in the hand: {:?}", g.origin);
 }

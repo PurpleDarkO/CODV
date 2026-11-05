@@ -43,6 +43,9 @@ struct Settings {
     // A locked Stinger / Javelin flies CODV's own missile (Mw2Missiles): no GTA projectile lifetime,
     // MW2's proximity fuse; off, and for every other shot: GTA's RPG rocket (steered when locked).
     bool ownMissiles = true;
+    // CODV's bullets on people, times MW2's damage (Damage): GTA's people take more than MW2's 100 health
+    // (armour, limb hits), so MW2's numbers alone feel weak there. Vehicles and props take MW2's damage.
+    float pedDamage = 1.5f;
 };
 
 class Driver {
@@ -77,6 +80,8 @@ public:
         s.streakAttacking = streakAttacking;
         ScanDeaths(player, now, s);
     }
+    // Someone hit by the player outside the gunplay (a throwing knife): a kill if they die soon after.
+    void Hit(Ped player, Ped target, DWORD now) { NoteHit(player, target, now); }
     std::uint32_t TakeHostileKills() {
         const std::uint32_t n = hostileKills_;
         hostileKills_ = 0;
@@ -146,6 +151,7 @@ private:
         DWORD firedAt = 0, movedAt = 0;
         bool top = false, dived = false; // the Javelin's top attack
         float apex = 0.0f;
+        std::uint32_t sound = 0;   // its flight's loop (MW2's Predator missile), louder as it nears
     };
     std::vector<OwnMissile> missiles_;
     // Aircraft a locked missile went off on: blown up a moment later if GTA's blast left them flying

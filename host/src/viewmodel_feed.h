@@ -26,6 +26,9 @@ struct Input {
     bool active = false;        // MW2 drives the player and the view model should show
     float cgFov = 65.0f;        // MW2 cg_fov (horizontal degrees at 4:3)
     float key = 1.0f, ambient = 0.35f;
+    bool scene = true;          // the scene behind the gun lights it too (ViewmodelLight=2)
+    float keepOut[4] = {};      // GTA's radar: a box of the screen the gun stays out of (vmrender::Frame)
+    float keepOutAlpha = 0.18f; // how much of the gun shows there
 };
 // Script thread, after cv_mw2_step. Returns MW2's lens FOV for this frame as
 // GTA's vertical degrees (the camera takes the same lens), or 0 when no view

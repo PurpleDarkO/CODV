@@ -6,6 +6,47 @@ noted with each release: a host and a runtime only work together on the same ABI
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-05
+
+Runtime ABI 10, unchanged (the runtime's additions are optional exports, options and flags). Run the setup
+again: it imports the new equipment's animations and icons from your MW2.
+
+### Added
+- Lethal on G / RB (menu Weapons, `Lethal`), with MW2's throw animation and HUD icon: the frag, the Semtex
+  (sticks to what it hits, cars and people too, and goes off 2 s later), the C4 (sticks where it lands; key 6
+  or a double tap of reload sets them all off, even from a vehicle), the Claymore (put down ahead of you; goes
+  off when a hostile walks into its lasers) or the throwing knife (kills in one hit, silently). "Grenades
+  carried" (`Frags`) sets how many; Scavenger gives one back.
+- Tactical on T / D-pad left (menu Weapons, `Tactical`), two carried, with MW2's animation and icon: the
+  flashbang (hostiles who see it cower, blinded; your screen goes white if you look at it), the stun (shorter)
+  or the smoke (a cloud for about 16 s).
+- Damage (menu Weapons, `Damage`): CODV's bullets do x1.5 MW2's damage to people by default (GTA's people,
+  with armour and limb hits, took more shots than MW2's players); MW2's numbers or x2 to choose.
+- Gun lighting (menu HUD, `ViewmodelLight`): the hands and gun follow the light around you (a dark alley, a
+  night street, a tunnel), the time of day only, or fixed daylight.
+- Gun over radar (menu HUD, `GunOverRadar`): under GTA's minimap the gun fades to a faint ghost by default, so
+  the map stays readable; drawn over it, or hidden, to choose.
+- Locked Stinger and Javelin missiles fly with a sound, loud at the launcher and fading as they fly off.
+- Ladders by holding C: standing still right at a ladder and facing it.
+- "JUGGERNAUT DOWN" shows over the score bar once his death's cinematic is over.
+- The log names what holds the player still (a vehicle, a person, an object or a map triangle).
+- Runtime (optional exports): `cv_mw2_text`, `cv_mw2_scorebar`, `cv_mw2_board_notice`, `cv_mw2_blocked_why`,
+  `cv_alias_loop`, `cv_alias_level`; options `CV_OPT_LETHAL`, `CV_OPT_TACTICAL`; `CV_GRENADE_LANDED` and
+  `CV_MW2_SMOKE`.
+
+### Changed
+- Police Juggernauts come far less often at five stars: after one joins, the next waits 1:30 to 2:30 at
+  least; up to three can still be up at once, but over minutes.
+- After a Tactical Nuke's blast no police are sent for 30 s, and no Juggernaut joins: a head start while the
+  stars run out.
+
+### Fixed
+- An invisible wall tens of metres wide around some props (a park sprinkler).
+- Invisible walls where a person lies or crawls on the ground.
+
+### Known issues
+- GTA's phone shows under MW2's HUD and gun.
+
 ## [0.2.0] - 2026-10-30
 
 Runtime ABI 10, unchanged (the runtime's additions are an optional export and optional flags).
@@ -131,6 +172,7 @@ First public release. Runtime ABI 10.
 - CODV's own missiles have no in-flight sound yet.
 - GTA V Enhanced and GTA Online are not supported.
 
-[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/PurpleDarkO/CODV/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/PurpleDarkO/CODV/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/PurpleDarkO/CODV/releases/tag/v0.1.0

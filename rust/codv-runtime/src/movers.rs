@@ -111,6 +111,26 @@ pub struct Body {
     reach: f32,
 }
 
+impl Body {
+    /// Diagnostics: its model, how its collision was made, its size and where it is.
+    pub fn describe(&self) -> String {
+        let shape = match self.shape {
+            Shape::Exact => "GTA's own collision",
+            Shape::Box => "its model's box",
+            Shape::Hull => "a person's hull",
+        };
+        format!(
+            "model {:08x}, {shape}, {} triangles, reach {:.1} m, at {:.1} {:.1} {:.1}",
+            self.model,
+            self.mesh.triangle_count(),
+            self.reach * METRES_PER_UNIT,
+            self.position[0],
+            self.position[1],
+            self.position[2]
+        )
+    }
+}
+
 /// What the last list held (debug overlay, status line).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MoverStats {
@@ -172,6 +192,10 @@ impl Movers {
     }
 }
 
+/// The largest object (across, metres) that stands as its model's box when its own collision cannot be read
+/// (a shipping container is 12 m long).
+const MAX_OBJECT_BOX: f32 = 14.0;
+
 /// One mover as a body, reusing `old`'s mesh when its shape and turn match.
 fn body(m: &CvMover, collision: &Streamer, old: Option<Body>) -> Option<Body> {
     if !(finite(&m.position)
@@ -209,6 +233,14 @@ fn body(m: &CvMover, collision: &Streamer, old: Option<Body>) -> Option<Body> {
                 // Nothing in GTA's bound stops a ped: an object is walked through as in GTA (a
                 // vehicle always keeps a body: its box).
                 collision::Template::Passable if m.kind != CV_MOVER_VEHICLE => return None,
+                // An object whose own collision is not in (yet, or ever) and whose model's box is far bigger
+                // than anything that blocks a walker (a park sprinkler's box takes in its spray, tens of
+                // metres): no body rather than an invisible wall that size. A vehicle keeps its box.
+                collision::Template::Pending | collision::Template::Box
+                    if m.kind != CV_MOVER_VEHICLE && size[0].max(size[1]) > MAX_OBJECT_BOX =>
+                {
+                    return None;
+                }
                 collision::Template::Pending | collision::Template::Box | collision::Template::Passable => {
                     (Shape::Box, [m.right, m.forward, m.up], None)
                 }
@@ -340,6 +372,12 @@ mod tests {
         assert_eq!(car.shape, Shape::Box);
         let unreadable = body(&mover(CV_MOVER_OBJECT, 2), &streamer, None).expect("unreadable: its box");
         assert_eq!(unreadable.shape, Shape::Box);
+        // A park sprinkler: its model's box takes in the spray (tens of metres): no invisible wall.
+        let sprinkler =
+            CvMover { box_min: [-30.0, -30.0, 0.0], box_max: [30.0, 30.0, 4.0], ..mover(CV_MOVER_OBJECT, 2) };
+        assert!(body(&sprinkler, &streamer, None).is_none(), "a giant box: no body");
+        let truck = CvMover { box_min: [-30.0, -30.0, 0.0], box_max: [30.0, 30.0, 4.0], ..mover(CV_MOVER_VEHICLE, 2) };
+        assert!(body(&truck, &streamer, None).is_some(), "a vehicle keeps its box");
     }
 
     #[test]

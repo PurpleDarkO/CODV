@@ -95,6 +95,18 @@ fn test_frag() -> Row {
     r
 }
 
+/// MW2's flashbang: offhand class 3, the smoke button's.
+fn test_flash() -> Row {
+    let mut r = test_frag();
+    r.name = "flash_grenade_mp".into();
+    for (k, v) in [("offhand_class", 3.0), ("fuse_time_ms", 1500.0), ("fire_time_ms", 699.0)] {
+        if let Some(e) = r.numbers.iter_mut().find(|(n, _)| n == k) {
+            e.1 = v;
+        }
+    }
+    r
+}
+
 fn table() -> Table {
     let mut loc = [1.0f32; HITLOCS];
     loc[2] = 1.4; // head
@@ -102,7 +114,7 @@ fn table() -> Table {
     Table {
         source: "test".into(),
         location: Some(loc),
-        weapons: vec![test_gun("auto_mp", 0), test_gun("semi_mp", 1), test_frag()],
+        weapons: vec![test_gun("auto_mp", 0), test_gun("semi_mp", 1), test_frag(), test_flash()],
     }
 }
 
@@ -568,4 +580,66 @@ fn sprint_and_aim_the_last_pressed_wins() {
     assert!(s && a < 0.1, "sprinting over the held aim: sprint {s} ads {a}");
     let (s, a) = hold(&mut rig, button::ADS, 80);
     assert!(!s && a > 0.9, "aiming again: sprint {s} ads {a}");
+}
+
+#[test]
+fn the_smoke_button_throws_the_special_grenade_and_the_frag_button_the_frag() {
+    let mut rig = Rig::new(&table(), &["auto_mp"]);
+    let (a, _) = Arsenal::from_table(&table());
+    let frag = a.offhand_id("frag_grenade_mp").unwrap();
+    let flash = a.offhand_id("flash_grenade_mp").expect("the flash is an offhand weapon");
+    assert_eq!(a.offhand(flash).unwrap().1.kind, ThrowKind::Flash);
+    assert!(!a.offhand(flash).unwrap().1.cook_off_hold, "a flash never cooks");
+    rig.gunner = Gunner::new(&rig.arsenal, &[rig.arsenal.id("auto_mp").unwrap()])
+        .with_frags(&rig.arsenal, "frag_grenade_mp", 2)
+        .with_tacticals(&rig.arsenal, "flash_grenade_mp", 2);
+    rig.frames(0, 100);
+    let smoke_button = playerstate_iw4::buttons::SMOKE;
+    let thrown: Vec<_> =
+        rig.frames(smoke_button, 60).into_iter().chain(rig.frames(0, 100)).filter_map(|f| f.thrown).collect();
+    assert_eq!(thrown.iter().map(|t| t.0).collect::<Vec<_>>(), vec![flash], "one flash from the smoke button");
+    assert_eq!(rig.gunner.tacticals(), (flash, 1));
+    assert_eq!(rig.frame(0).frags, 2, "the frags untouched");
+    let thrown: Vec<_> =
+        rig.frames(button::FRAG, 60).into_iter().chain(rig.frames(0, 100)).filter_map(|f| f.thrown).collect();
+    assert_eq!(thrown.iter().map(|t| t.0).collect::<Vec<_>>(), vec![frag], "the frag button still throws the frag");
+    assert_eq!(rig.gunner.tacticals(), (flash, 1), "the frag left the special grenades alone");
+    assert_eq!(rig.frame(0).frags, 1, "one frag spent");
+}
+
+#[test]
+fn a_throwing_knife_leaves_the_hand() {
+    let mut t = table();
+    let mut knife = test_frag();
+    knife.name = "throwingknife_mp".into();
+    for (k, v) in [
+        ("offhand_class", 4.0),
+        ("hold_fire_time_ms", 0.0),
+        ("fire_time_ms", 550.0),
+        ("fuse_time_ms", 30000.0),
+        ("projectile_speed", 1400.0),
+        ("offhand_hold_is_cancelable", 1.0),
+    ] {
+        if let Some(e) = knife.numbers.iter_mut().find(|(n, _)| n == k) {
+            e.1 = v;
+        }
+    }
+    t.weapons.push(knife);
+    let mut rig = Rig::new(&t, &["auto_mp"]);
+    let id = rig.arsenal.offhand_id("throwingknife_mp").expect("the knife is an offhand");
+    rig.gunner = Gunner::new(&rig.arsenal, &[rig.arsenal.id("auto_mp").unwrap()]).with_frags(
+        &rig.arsenal,
+        "throwingknife_mp",
+        1,
+    );
+    rig.frames(0, 100);
+    let frames: Vec<_> = rig.frames(button::FRAG, 10).into_iter().chain(rig.frames(0, 150)).collect();
+    let thrown: Vec<_> = frames.iter().filter_map(|f| f.thrown).collect();
+    println!(
+        "prepare {} view {} thrown {:?}",
+        frames.iter().any(|f| f.offhand_prepare),
+        frames.iter().any(|f| f.offhand_view == Some(id)),
+        thrown
+    );
+    assert_eq!(thrown.iter().map(|t| t.0).collect::<Vec<_>>(), vec![id], "one knife thrown");
 }

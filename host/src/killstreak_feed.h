@@ -42,6 +42,12 @@ struct Frame {
 };
 
 void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log);
+// A game mode's own Tactical Nuke (a mode's finale): MW2's countdown and blast, everyone near dies, the player
+// is spared; it runs to its end although the mode keeps the killstreaks' effects off.
+void ModeNuke(RuntimeBridge& runtime, util::LogFn log);
+bool NukeInbound();
+// A while after a nuke's blast no police are sent (the player may get away).
+bool PoliceGrace();
 // Testing: hands `reward` (a CvKillstreak) to the player next frame, on top of what it holds (4 calls it in).
 void GrantForTest(std::uint32_t reward);
 // A reward waits for action slot 4 (controls: the D-pad's right / INPUT_CONTEXT is ours then).

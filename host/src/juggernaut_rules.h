@@ -1,6 +1,6 @@
 #pragma once
 // Police Juggernauts (Free Roam, PoliceJuggernauts=1), the host's rules (plain C++; host/tests checks them):
-// at four stars a Juggernaut may join the police now and then (one at a time), at five up to two. Heavy
+// at four stars a Juggernaut may join the police now and then (one at a time), at five up to three, minutes apart. Heavy
 // armour and a heavy machine gun; slow, hard to stop, no head shot kill. CODV's own numbers.
 #include <algorithm>
 #include <cmath>
@@ -17,6 +17,15 @@ inline constexpr std::uint32_t kAfterDeathMs[3] = {45000, 75000, 105000};
 inline std::uint32_t AfterDeathMs(float r) {
     const int i = r < 1.0f / 3.0f ? 0 : r < 2.0f / 3.0f ? 1 : 2;
     return kAfterDeathMs[i];
+}
+
+// After one joins (while the last is still up), the next waits one of these at least, picked at random: at
+// five stars the second and the third come well apart, never in a pile: 1:30, 2:00 or 2:30.
+inline constexpr std::uint32_t kAfterSpawnMs[3] = {90000, 120000, 150000};
+
+inline std::uint32_t AfterSpawnMs(float r) {
+    const int i = r < 1.0f / 3.0f ? 0 : r < 2.0f / 3.0f ? 1 : 2;
+    return kAfterSpawnMs[i];
 }
 inline constexpr int kHealth = 1500;             // GTA health (a police officer has 200)
 inline constexpr int kArmour = 100;
@@ -44,7 +53,7 @@ inline int MaxAlive(int stars) {
 
 // The chance at each check that one comes (while fewer than MaxAlive are up).
 inline float Chance(int stars) {
-    return stars >= 5 ? 0.40f : stars == 4 ? 0.20f : 0.0f;
+    return stars >= 5 ? 0.25f : stars == 4 ? 0.20f : 0.0f;
 }
 
 // The cinematics (JuggernautCinematics=1): his entrance in three cuts, his death in slow motion around him.

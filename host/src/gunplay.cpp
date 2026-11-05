@@ -41,6 +41,9 @@ constexpr float kAirLockRange = 2500.0f;
 // proximity fuse (aircraft, ground vehicles) and the distance flown before it arms.
 constexpr float kOwnSpeed = 120.0f;
 constexpr DWORD kOwnLifeMs = 25000; // 3 km at kOwnSpeed: past the Stinger's lock range
+// The flight's sound: MW2's Predator missile in flight (_remotemissile.gsc), an imported alias.
+constexpr const char* kMissileLoop = "move_remotemissile_proj_loop1";
+using aim::MissileLoopLevel;
 constexpr float kFuseAir = 12.0f, kFuseGround = 3.0f, kArmMetres = 15.0f;
 // Against aircraft: within kTerminal metres the missile turns almost at once (an aircraft crosses its
 // path faster than the cruise turn follows), and having passed within kPassFuse it goes off on the
@@ -295,7 +298,8 @@ void Driver::Fire(Ped player, const CvOutput& out, const Settings& s, DWORD now)
                 Launch(player, f3, t3, ignore, now);
                 continue;
             }
-            const int dmg = i < damage.size() ? std::max(1, static_cast<int>(std::lround(damage[i]))) : 1;
+            const float scale = p.ped ? s.pedDamage : 1.0f;
+            const int dmg = i < damage.size() ? std::max(1, static_cast<int>(std::lround(damage[i] * scale))) : 1;
             Call<void>(gta::SHOOT_SINGLE_BULLET_BETWEEN_COORDS_IGNORE_ENTITY, from.x, from.y, from.z, to.x, to.y, to.z, dmg,
                        TRUE, out.shots[i].gta_hash, player, s.gtaGunSound ? TRUE : FALSE, FALSE, -1.0f, ignore, 0);
         }
@@ -544,6 +548,8 @@ void Driver::Launch(Ped player, const float from[3], const float to[3], Entity i
             m.trail = StartTrail(m.prop, log_);
         }
     }
+    // Its flight's sound: MW2's Predator missile loop (an imported alias), full at the launcher.
+    m.sound = runtime_.LoopAlias(kMissileLoop, 1.0f);
     if (!m.prop) {
         static bool logged = false;
         if (!logged) {
@@ -556,6 +562,7 @@ void Driver::Launch(Ped player, const float from[3], const float to[3], Entity i
         OwnMissile& old = missiles_.front();
         if (old.trail) Call<void>(gta::STOP_PARTICLE_FX_LOOPED, old.trail, FALSE);
         if (old.prop && Call<BOOL>(gta::DOES_ENTITY_EXIST, old.prop)) Call<void>(gta::DELETE_OBJECT, &old.prop);
+        runtime_.AliasLevel(old.sound, 0.0f);
         missiles_.erase(missiles_.begin());
     }
     missiles_.push_back(m);
@@ -653,11 +660,18 @@ void Driver::Fly(Ped player, DWORD now) {
             Call<void>(gta::ADD_OWNED_EXPLOSION, player, at.x, at.y, at.z, kExpRocket, 1.0f, TRUE, FALSE, 1.0f);
             if (m.trail) Call<void>(gta::STOP_PARTICLE_FX_LOOPED, m.trail, FALSE);
             if (m.prop && Call<BOOL>(gta::DOES_ENTITY_EXIST, m.prop)) Call<void>(gta::DELETE_OBJECT, &m.prop);
+            runtime_.AliasLevel(m.sound, 0.0f);
             missiles_.erase(missiles_.begin() + static_cast<std::ptrdiff_t>(i));
             continue;
         }
         m.travelled += aim::Distance(a, b);
         m.pos[0] = b.x, m.pos[1] = b.y, m.pos[2] = b.z;
+        if (m.sound) {
+            // Fainter as it flies off (and louder as one comes back near): full within kLoopNear.
+            const Vector3 me = Call<Vector3>(gta::GET_ENTITY_COORDS, player, TRUE);
+            const float d = aim::Distance(b, aim::Vec{me.x, me.y, me.z});
+            runtime_.AliasLevel(m.sound, MissileLoopLevel(d));
+        }
         if (m.prop && Call<BOOL>(gta::DOES_ENTITY_EXIST, m.prop)) {
             // GTA's physics carries the model; it is put back on the path only when it drifts off.
             const Vector3 at3 = Call<Vector3>(gta::GET_ENTITY_COORDS, m.prop, FALSE);
@@ -677,6 +691,7 @@ void Driver::ClearMissiles() {
     for (OwnMissile& m : missiles_) {
         if (m.trail) Call<void>(gta::STOP_PARTICLE_FX_LOOPED, m.trail, FALSE);
         if (m.prop && Call<BOOL>(gta::DOES_ENTITY_EXIST, m.prop)) Call<void>(gta::DELETE_OBJECT, &m.prop);
+        runtime_.AliasLevel(m.sound, 0.0f);
     }
     missiles_.clear();
 }
