@@ -35,6 +35,8 @@
 #include "equipment_rules.h"
 #include "tactical.h"
 #include "tactical_rules.h"
+#include "tracers.h"
+#include "minimap_rules.h"
 #include "radar_box.h"
 #include "viewmodel_feed.h"
 
@@ -107,6 +109,8 @@ struct Config {
     // MW2's gun over GTA's radar (GunOverRadar): 0 drawn over it, 1 a faint ghost under it (the default),
     // 2 hidden under it.
     int gunOverRadar = 1;
+    // GTA's minimap turns with CODV's view under MW2 (MinimapFollowsView), like MW2's radar.
+    bool minimapFollowsView = true;
     // F4b: MW2's third-person animation on the GTA ped (needs the MW2 import).
     bool bodyPose = true;
     // F5b: MW2's weapon bar, hit marker, damage arrows and grenade indicator (with the import's HUD).
@@ -152,6 +156,7 @@ struct Config {
     // MW2's Scavenger: hostile kills give a magazine more for every gun and a frag.
     bool scavenger = true;
     int fallDamage = 1; // 0 none, 1 light, 2 MW2's
+    int tracers = 1;    // MW2's tracers (Tracers): 0 off, 1 MW2's, 2 every shot
     float sprintSpeed = 1.65f; // MW2 1.5
     bool staminaBar = true;
     bool scorebar = true; // the kill counter (session kills, streak, deaths) in MW2's score bar
@@ -226,6 +231,7 @@ Config LoadConfig() {
     c.viewmodel = util::IniFlag(ini, "Viewmodel", c.viewmodel);
     c.viewmodelLight = std::clamp(static_cast<int>(util::IniFloat(ini, "ViewmodelLight", static_cast<float>(c.viewmodelLight))), 0, 2);
     c.gunOverRadar = std::clamp(static_cast<int>(util::IniFloat(ini, "GunOverRadar", static_cast<float>(c.gunOverRadar))), 0, 2);
+    c.minimapFollowsView = util::IniFlag(ini, "MinimapFollowsView", c.minimapFollowsView);
     c.bodyPose = util::IniFlag(ini, "BodyPose", c.bodyPose);
     c.mw2Hud = util::IniFlag(ini, "Mw2Hud", c.mw2Hud);
     c.bodyFirstPerson = util::IniFlag(ini, "BodyInFirstPerson", c.bodyFirstPerson);
@@ -256,6 +262,8 @@ Config LoadConfig() {
     c.weaponSets = util::IniFlag(ini, "WeaponSets", c.weaponSets);
     c.ownMissiles = util::IniFlag(ini, "Mw2Missiles", c.ownMissiles);
     c.damage = std::clamp(static_cast<int>(util::IniFloat(ini, "Damage", static_cast<float>(c.damage))), 0, 2);
+    c.tracers = tracers::ClampMode(static_cast<int>(util::IniFloat(ini, "Tracers", static_cast<float>(c.tracers))));
+    tracers::g_mode = c.tracers;
     c.ammoScale = std::clamp(util::IniFloat(ini, "AmmoScale", c.ammoScale), 0.0f, 20.0f);
     c.jumpHeight = std::clamp(util::IniFloat(ini, "JumpHeight", c.jumpHeight), 20.0f, 80.0f);
     c.sprintTime = std::clamp(util::IniFloat(ini, "SprintTime", c.sprintTime), 1.0f, 16.0f);
@@ -454,6 +462,7 @@ const Description kDescriptions[] = {
     {"NumberKeys", "Number keys", "1 primaries, 2 secondaries, 3 snipers, 5 launchers; press again for the group's next gun."},
     {"RecoilScale", "Recoil", "Every weapon's kick, times MW2's."},
     {"Damage", "Damage", "Bullet damage on people: MW2's, x1.5 or x2 (GTA's people take more hits than MW2's)."},
+    {"Tracers", "Tracers", "Bullet tracers: off, MW2's (some shots; killstreak guns every round) or every shot."},
     {"FireMode", "Shots", "CODV bullets (MW2 damage and spread) or GTA's trigger at CODV's timing."},
     {"SoundGainDb", "Weapon volume", "MW2 weapon sounds, in dB over GTA's sound effects volume."},
     {"GiveLoadout", "Give loadout", "Give the loadout weapons when CODV is switched on, if you lack them."},
@@ -491,6 +500,7 @@ const Description kDescriptions[] = {
     {"Mw2Blood", "MW2 blood", "MW2's blood on the screen as your health drops."},
     {"ViewmodelLight", "Gun lighting", "Hands and gun: fixed daylight, GTA's time of day, or the light around you."},
     {"GunOverRadar", "Gun over radar", "Hands and gun over GTA's minimap: drawn over it, a faint ghost under it, or hidden."},
+    {"MinimapFollowsView", "Minimap follows view", "Under MW2 the minimap turns with where you look, like MW2's radar. Off: GTA's own."},
     {"KillFeedback", "Kill points", "The yellow +100 and splashes like Headshot!"},
     {"Crosshair", "Crosshair", "Show the crosshair."},
     {"Hitmarker", "Hit marker", "Show the hit marker."},
@@ -538,16 +548,6 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     // Item 0 is the live mode (not saved; ScriptMain keeps it in sync with the toggle).
     items.push_back(menu::Flag("CODV mode", "", c.enabled, [](float) { g_modeToggle = true; }));
     items.back().help = "Switch CODV on or off (also F10, Back + RB, or MW2 in GTA's weapon wheel).";
-#if CODV_EXPERIMENTAL
-    // The game mode (experimental builds only).
-    items.push_back(menu::Choice("Game mode", "GameMode", c.gameMode, experimental::kModeNames,
-                                 apply([&c](float v) {
-                                     c.gameMode = experimental::ClampMode(static_cast<int>(v));
-                                     c.playMode = experimental::FirstPlayMode(c.gameMode);
-                                 })));
-    items.back().help = experimental::kModeHelp;
-#endif
-
     items.push_back(menu::Section("Weapons"));
     if (!mw2Guns.empty()) {
         // MW2's weapons (the import): any base gun in either slot, the spare rounds, the frags.
@@ -572,6 +572,10 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
                                    [&c](float v) { c.ownMissiles = v != 0; }));
         items.push_back(menu::Choice("Damage", "Damage", c.damage, {"MW2", "x1.5", "x2"},
                                      [&c](float v) { c.damage = std::clamp(static_cast<int>(v), 0, 2); }));
+        items.push_back(menu::Choice("Tracers", "Tracers", c.tracers, {"Off", "MW2", "Every shot"}, [&c](float v) {
+            c.tracers = tracers::ClampMode(static_cast<int>(v));
+            tracers::g_mode = c.tracers;
+        }));
         items.push_back(menu::Choice("Primary (MW2)", "Mw2Primary", p, mw2Names, [&c](float v) {
             c.mw2Primary = static_cast<int>(v);
             g_runtime.SetOption(CV_OPT_MW2_PRIMARY, v);
@@ -675,6 +679,8 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
                                  [&c](float v) { c.viewmodelLight = std::clamp(static_cast<int>(v), 0, 2); }));
     items.push_back(menu::Choice("Gun over radar", "GunOverRadar", c.gunOverRadar, {"Over", "Ghost", "Hidden"},
                                  [&c](float v) { c.gunOverRadar = std::clamp(static_cast<int>(v), 0, 2); }));
+    items.push_back(menu::Flag("Minimap follows view", "MinimapFollowsView", c.minimapFollowsView,
+                               [&c](float v) { c.minimapFollowsView = v != 0; }));
     items.push_back(menu::Flag("Kill points and splashes (+100, Headshot!)", "KillFeedback", c.killFeedback,
                                apply([&c](float v) { c.killFeedback = v != 0; })));
     items.push_back(menu::Flag("Crosshair", "Crosshair", c.hud.crosshair, [&c](float v) { c.hud.crosshair = v != 0; }));
@@ -724,9 +730,33 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     items.push_back(menu::Action("Test: spawn a minigun Juggernaut", [](float) { jugg::RequestTestSpawn(true); }));
     items.back().help = "The rare one (1% of Juggernauts): a minigun instead of the heavy machine gun.";
 #if CODV_EXPERIMENTAL
-    // Testing (experimental builds): a pack of climbers below the player, up on something in Survival.
-    items.push_back(menu::Action("Test: zombie climbers (Survival)", [](float) { survival::RequestClimbTest(); }));
+    // Zombies (experimental builds): the game mode and everything about the zombie modes in one page.
+    items.push_back(menu::Section("Zombies"));
+    items.push_back(menu::Choice("Game mode", "GameMode", c.gameMode, experimental::kModeNames,
+                                 apply([&c](float v) {
+                                     c.gameMode = experimental::ClampMode(static_cast<int>(v));
+                                     c.playMode = experimental::FirstPlayMode(c.gameMode);
+                                 })));
+    items.back().help = experimental::kModeHelp;
+    items.push_back(menu::Choice("Wrecked streets", "Wrecks", wrecks::g_density, experimental::kWreckNames,
+                                 [](float v) { wrecks::g_density = wrecks::ClampDensity(static_cast<int>(v)); }));
+    items.back().help = experimental::kWreckHelp;
+    items.push_back(menu::Number("Survival: start wave", "SurvivalStartWave", static_cast<float>(survival::g_startWave), 1.0f, 20.0f, 1.0f,
+                                 "%.0f", [](float v) { survival::g_startWave = static_cast<int>(v); }));
+    items.back().help = "The wave a Survival run starts at (the next run; capped at the final wave).";
+    // Testing: each zombie mode's moments on demand.
+    items.push_back(menu::Action("Test: zombie climbers", [](float) { survival::RequestClimbTest(); }));
     items.back().help = "In Survival: stand on something 2 to 5 m high; 8 climbing zombies come at you from below.";
+    items.push_back(menu::Action("Test: supply drop", [](float) { survival::RequestEventTest(survival::Extra::Supply); }));
+    items.back().help = "In Survival: a supply crate comes down on a parachute ahead of you now.";
+    items.push_back(menu::Action("Test: survivor to rescue", [](float) { survival::RequestEventTest(survival::Extra::Rescue); }));
+    items.back().help = "In Survival: a survivor cornered by zombies calls for help nearby now (green dot on the radar).";
+    items.push_back(menu::Action("Test: fuel tanker", [](float) { survival::RequestEventTest(survival::Extra::Tanker); }));
+    items.back().help = "In Survival: a leaking fuel tanker stands on a road 130 to 190 m off now (red dot): lure them in, shoot it.";
+    items.push_back(menu::Action("Test: special horde", [](float) { survival::RequestTwistTest(survival::Twist::Horde); }));
+    items.back().help = "In a Survival wave: a horde of one kind (sprinters, dogs, leapers or brutes) comes a few seconds from now.";
+    items.push_back(menu::Action("Test: fog / blood night", [](float) { survival::RequestTwistTest(survival::Twist::Fog); }));
+    items.back().help = "In a Survival wave: a thick fog rolls in, then a blood night the next time (100 s each).";
 #endif
     Describe(m);
     return m;
@@ -831,6 +861,7 @@ void ScriptMain() {
     bool driving = false;   // CODV currently owns the player (mode on, not blocked)
     bool modeSwitchedOff = false; // this frame: the killstreak count restarts
     bool remoteView = false;      // a killstreak's camera had the view last frame
+    bool minimapLocked = false;   // GTA's minimap held to CODV's view (MinimapFollowsView)
     CvOutput last{};        // last frame's output (control policy)
     const auto save = [](const std::string& key, const std::string& value) {
         if (key.empty()) return; // live-only item
@@ -885,6 +916,7 @@ void ScriptMain() {
 
         const Ped player = Call<Ped>(gta::PLAYER_PED_ID);
         if (liveCollision) physlevel::Tick();
+        tracers::Tick(); // MW2's tracers in flight, every frame (the player's shots and the killstreaks')
         // Movers for the MW2 world every frame it may be used (the mode, or the debug probe).
         if (liveCollision && (cfg.enabled || cfg.debug))
             g_runtime.SetMovers(gatherer.Gather(player, Call<Vector3>(gta::GET_ENTITY_COORDS, player, TRUE), 30.0f));
@@ -990,6 +1022,10 @@ void ScriptMain() {
             equip::Tick(g_runtime, player, equip::Frame{}, Log);
             tactical::Tick(player, false, 0.0f, 0.0f, equip::Frame{}.eye);
             gtaaudio::Tick(false);
+            if (minimapLocked) {
+                Call<void>(gta::UNLOCK_MINIMAP_ANGLE);
+                minimapLocked = false;
+            }
             WAIT(0);
             continue;
         }
@@ -1023,6 +1059,23 @@ void ScriptMain() {
             float kickPitch = 0.0f, kickYaw = 0.0f;
             drive.TakeKick(kickPitch, kickYaw);
             mw2On = mw2drv.Tick(player, cfg.mw2, dt, kickPitch, kickYaw, now);
+        }
+        {
+            // GTA's minimap turns with CODV's view while MW2 has the player on foot (MW2's radar); GTA's own
+            // in a vehicle, in a killstreak's camera, or with the option off.
+            const bool follow = cfg.minimapFollowsView && mw2On && !remote && mw2drv.CurrentView().active;
+            if (follow) {
+                const int angle = minimap::Angle(mw2drv.CurrentView().heading);
+                Call<void>(gta::LOCK_MINIMAP_ANGLE, angle);
+                if (!minimapLocked) Logf("CODV: minimap follows the view (heading %.0f, minimap angle %d)", mw2drv.CurrentView().heading, angle);
+                minimapLocked = true;
+            } else if (minimapLocked) {
+                Call<void>(gta::UNLOCK_MINIMAP_ANGLE);
+                minimapLocked = false;
+                Log("CODV: minimap back to GTA's");
+            }
+        }
+        if (cfg.mw2Movement) {
             // F4a: the view model of this step, and MW2's lens (ADS zoom) for the camera too.
             vmfeed::Input vi;
             // A ladder try keeps the gun on screen (the last frame: GTA has the player for a moment).

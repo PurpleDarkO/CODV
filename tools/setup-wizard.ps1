@@ -282,6 +282,11 @@ $install.Add_Click({
     return
   }
   if (Find-Python) { Start-Prepare; return }
+  # The release carries its own Python (python\); without it (a partial extract) say so instead of downloading.
+  if (-not (Test-Path (Join-Path $Root 'tools\get-python.ps1'))) {
+    Show-Result $false 'Python missing' 'The python folder is missing: extract the whole CODV zip again, then run CODV Setup.cmd.'
+    return
+  }
   $ask = "Setup runs on Python 3.11 or newer, which this PC does not have.`n`n" +
          "Download the official embeddable Python now? About 11 MB from python.org, checked against its published " +
          "hash and kept in this setup folder. Nothing is installed on your PC."

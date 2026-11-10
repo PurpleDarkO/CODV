@@ -4,6 +4,7 @@
 #include "killstreak_rules.h"
 #include "killstreak_world.h"
 #include "natives.h"
+#include "tracers.h"
 
 #include <main.h>
 
@@ -14,6 +15,29 @@
 #include <vector>
 
 namespace gunplay {
+
+namespace {
+constexpr Hash kGrenadeLauncherGun = util::Joaat("weapon_grenadelauncher");
+constexpr int kHeadBone = 31086, kRightHandBone = 57005;
+
+// Where a tracer leaves from: in first person (the camera at the head) the gun's muzzle, low and to the right
+// of the view from the hip, just under the centre aiming down the sights (`ads`, tracer_rules.h); in third
+// person, just past the right hand.
+aim::Vec TracerFrom(Ped player, const aim::Vec& cam, const aim::Vec& dir, float ads) {
+    const Vector3 head = gta::Call<Vector3>(gta::GET_PED_BONE_COORDS, player, kHeadBone, 0.0f, 0.0f, 0.0f);
+    const float hx = head.x - cam.x, hy = head.y - cam.y, hz = head.z - cam.z;
+    if (hx * hx + hy * hy + hz * hz < 0.9f * 0.9f) {
+        const float flat = std::max(0.001f, std::sqrt(dir.x * dir.x + dir.y * dir.y));
+        const float rx = dir.y / flat, ry = -dir.x / flat; // to the right of the view
+        float forward = 0.0f, right = 0.0f, down = 0.0f;
+        tracers::Muzzle(ads, forward, right, down);
+        const aim::Vec ahead = aim::Along(cam, dir, forward);
+        return {ahead.x + rx * right, ahead.y + ry * right, ahead.z - down};
+    }
+    const Vector3 hand = gta::Call<Vector3>(gta::GET_PED_BONE_COORDS, player, kRightHandBone, 0.0f, 0.0f, 0.0f);
+    return aim::Along({hand.x, hand.y, hand.z}, dir, 0.4f);
+}
+} // namespace
 using gta::Call;
 
 namespace {
@@ -302,6 +326,11 @@ void Driver::Fire(Ped player, const CvOutput& out, const Settings& s, DWORD now)
             const int dmg = i < damage.size() ? std::max(1, static_cast<int>(std::lround(damage[i] * scale))) : 1;
             Call<void>(gta::SHOOT_SINGLE_BULLET_BETWEEN_COORDS_IGNORE_ENTITY, from.x, from.y, from.z, to.x, to.y, to.z, dmg,
                        TRUE, out.shots[i].gta_hash, player, s.gtaGunSound ? TRUE : FALSE, FALSE, -1.0f, ignore, 0);
+            if (gun != kRocket && gun != kHoming && gun != kGrenadeLauncherGun) { // MW2's tracer, now and then
+                const aim::Vec t0 = TracerFrom(player, cam, p.dir, out.hud.ads);
+                const float a[3] = {t0.x, t0.y, t0.z}, b[3] = {p.target.x, p.target.y, p.target.z};
+                tracers::Shot(a, b, false);
+            }
         }
     }
     if (s.fire == FireMode::Ped) {

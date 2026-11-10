@@ -50,6 +50,9 @@ RecoilScale=1
 ; Damage: CODV's bullet damage on people. 0 = MW2's numbers, 1 = x1.5 (default), 2 = x2. GTA's people (armour,
 ; limb hits) take more shots than MW2's players; vehicles and props always take MW2's damage.
 Damage=1
+; Tracers: bullet tracers, MW2 style: a short bright streak from the gun to where the shot struck.
+; 0 = off, 1 = MW2's (about one shot in five; the killstreaks' heavy guns every round, default), 2 = every shot.
+Tracers=1
 ; FireMode: 0 = CODV bullets (CODV's timing, spread and range damage; GTA draws impacts and blood),
 ;           1 = GTA's own trigger at CODV's timing and aim point (GTA's damage and muzzle flash).
 FireMode=0
@@ -170,6 +173,9 @@ ViewmodelLight=2
 ; GunOverRadar: the hands and gun over GTA's minimap. 0 = drawn over it, 1 = a faint ghost under it (default),
 ; 2 = hidden under it.
 GunOverRadar=1
+; MinimapFollowsView: with MW2's movement on foot, GTA's minimap turns with where you look, like MW2's radar
+; (1, default). 0: GTA's own minimap, turning with GTA's camera.
+MinimapFollowsView=1
 KillFeedback=1
 ; JumpSlowdown: MW2's slowdown when landing a jump (0: a landing keeps the speed).
 JumpSlowdown=0

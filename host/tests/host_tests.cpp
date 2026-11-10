@@ -18,6 +18,8 @@
 #include "juggernaut_rules.h"
 #include "equipment_rules.h"
 #include "tactical_rules.h"
+#include "tracer_rules.h"
+#include "minimap_rules.h"
 #include "radar_box.h"
 #include "mw2_input.h"
 #include "pad.h"
@@ -560,6 +562,41 @@ static void EquipmentRules() {
     CHECK(InCone(at, 90.0f, west) && !InCone(at, 0.0f, west));
 }
 
+static void TracerRules() {
+    using namespace tracers;
+    // Who draws one: off never; MW2's about one shot in five, the heavy guns always; every shot always.
+    CHECK(!Draws(kOff, true, 0.0f) && Draws(kMw2, false, 0.1f) && !Draws(kMw2, false, 0.5f) && Draws(kMw2, true, 0.9f));
+    CHECK(Draws(kEvery, false, 0.99f) && ClampMode(-1) == kOff && ClampMode(7) == kEvery);
+    // The streak: grows from the gun, runs at MW2's speed, never past the end, gone once its tail gets there.
+    float head = 0.0f, tail = 0.0f;
+    CHECK(Streak(0, 50.0f, false, head, tail) && head == 0.0f && tail == 0.0f);
+    CHECK(Streak(100, 50.0f, false, head, tail) && Near(head, kSpeed * 0.1f) && Near(tail, kSpeed * 0.1f - kLength));
+    CHECK(Streak(270, 50.0f, false, head, tail) && head == 50.0f && tail < 50.0f);
+    CHECK(!Streak(2000, 50.0f, false, head, tail));
+    CHECK(Streak(270, 50.0f, true, head, tail) && head - tail > kLength); // the heavy streak is longer
+    // The muzzle: low right from the hip, just under the centre aiming down the sights, sliding in between.
+    float ahead = 0.0f, right = 0.0f, down = 0.0f;
+    Muzzle(0.0f, ahead, right, down);
+    CHECK(Near(right, kHipRight) && Near(down, kHipDown) && Near(ahead, kMuzzleAhead));
+    Muzzle(1.0f, ahead, right, down);
+    CHECK(right == 0.0f && Near(down, kAdsDown));
+    Muzzle(0.5f, ahead, right, down);
+    CHECK(right > 0.0f && right < kHipRight && down < kHipDown && down > kAdsDown);
+    Muzzle(3.0f, ahead, right, down);
+    CHECK(right == 0.0f); // past full ADS: still the centre
+}
+
+static void MinimapRules() {
+    // The minimap's angle: whole degrees in 0..359 for any heading.
+    CHECK(minimap::Angle(0.0f) == 0 && minimap::Angle(90.0f) == (minimap::kFlip ? 270 : 90));
+    CHECK(minimap::Angle(359.7f) == 0 && minimap::Angle(-90.0f) == (minimap::kFlip ? 90 : 270));
+    CHECK(minimap::Angle(720.0f + 45.0f) == (minimap::kFlip ? 315 : 45));
+    for (int h = -720; h <= 720; h += 7) {
+        const int a = minimap::Angle(static_cast<float>(h));
+        CHECK(a >= 0 && a < 360);
+    }
+}
+
 static void TacticalRules() {
     using namespace tactical;
     CHECK(kFlash == 1 && kStun == 2 && kSmoke == 3); // CV_OPT_TACTICAL's values
@@ -588,6 +625,8 @@ static void RadarBox() {
 int main() {
     RadarBox();
     TacticalRules();
+    TracerRules();
+    MinimapRules();
     EquipmentRules();
     InputMap();
     ControlPolicy();

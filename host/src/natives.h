@@ -345,11 +345,31 @@ CV_NATIVE(DRAW_LIGHT_WITH_RANGE, 0xF2A1B2771A01DBD4)     // void (3 at, int r, i
 // MW2's special grenades (tactical.cpp): a flashed or stunned hostile shields its eyes.
 CV_NATIVE(TASK_COWER, 0x3EB1FE9E8E908E15)                // void (Ped, int ms)
 CV_NATIVE(IS_MODEL_IN_CDIMAGE, 0x35B9E0803292B641)       // BOOL (Hash): the game has this model
+CV_NATIVE(TASK_CLIMB, 0x89D9FCC2435112F1)                // void (Ped, BOOL unused): GTA's own climb or vault ahead
 // GTA's HUD over MW2's gun (main.cpp): where the radar is, the phone and the weapon wheel up.
 CV_NATIVE(GET_SAFE_ZONE_SIZE, 0xBAF107B6BB2C97F0)        // float ()
 CV_NATIVE(IS_RADAR_HIDDEN, 0x157F93B036700462)           // BOOL ()
 CV_NATIVE(IS_PED_RUNNING_MOBILE_PHONE_TASK, 0x2AFE52F782F25775) // BOOL (Ped)
 CV_NATIVE(IS_HUD_COMPONENT_ACTIVE, 0xBC4C9EA5391ECC0D)   // BOOL (int component)
+// The zombie modes' wrecked streets (experimental)
+CV_NATIVE(SET_ENTITY_RENDER_SCORCHED, 0x730F5F8D3F0F2050) // void (Entity, BOOL): drawn burnt
+CV_NATIVE(SET_VEHICLE_DIRT_LEVEL, 0x79D3B596FE44EE8B)     // void (Vehicle, float 0..15)
+CV_NATIVE(SET_VEHICLE_ENVEFF_SCALE, 0x3AFDC536C3D01674)   // void (Vehicle, float 0..1): rust, on models that have it
+CV_NATIVE(SET_VEHICLE_DOOR_OPEN, 0x7C65DAC73C35C862)      // void (Vehicle, int door, BOOL loose, BOOL instantly)
+CV_NATIVE(SET_VEHICLE_DOOR_BROKEN, 0xD4D4F6A4AB575A33)    // void (Vehicle, int door, BOOL deleteDoor)
+CV_NATIVE(SMASH_VEHICLE_WINDOW, 0x9E5B5E4D2CCD2259)       // void (Vehicle, int window)
+CV_NATIVE(SET_VEHICLE_TYRE_BURST, 0xEC6A202EE4960385)     // void (Vehicle, int tyre, BOOL onRim, float damage)
+CV_NATIVE(SET_VEHICLE_DAMAGE, 0xA1DD317EA8FD4F29)         // void (Vehicle, 3 offset, float damage, float radius, BOOL focusOnModel)
+CV_NATIVE(SET_VEHICLE_BODY_HEALTH, 0xB77D05AC8C78AADB)    // void (Vehicle, float)
+CV_NATIVE(SET_VEHICLE_UNDRIVEABLE, 0x8ABA6AF54B942B95)    // void (Vehicle, BOOL)
+CV_NATIVE(SET_VEHICLE_DOORS_LOCKED, 0xB664292EAECF7FA6)   // void (Vehicle, int lockStatus)
+CV_NATIVE(IS_ANY_VEHICLE_NEAR_POINT, 0x61E1DD6125A3EEE6)  // BOOL (x, y, z, radius)
+CV_NATIVE(SET_VEHICLE_ON_GROUND_PROPERLY, 0x49733E92263139D1) // BOOL (Vehicle, float)
+CV_NATIVE(TASK_FOLLOW_TO_OFFSET_OF_ENTITY, 0x304AE42E357B8C7E) // void (Ped, Entity, 3 offset, float speed, int timeout, float stopRange, BOOL persist)
+CV_NATIVE(GET_CURR_WEATHER_STATE, 0xF3BBE884A14BB413) // void (Hash* from, Hash* to, float* percentTo)
+CV_NATIVE(SET_CURR_WEATHER_STATE, 0x578C752848ECFA0C) // void (Hash from, Hash to, float percentTo)
+CV_NATIVE(LOCK_MINIMAP_ANGLE, 0x299FAEBB108AE05B)   // void (int angle 0..360): the minimap turned to this angle
+CV_NATIVE(UNLOCK_MINIMAP_ANGLE, 0x8183455E16C42E3A) // void (): GTA turns the minimap again
 #undef CV_NATIVE
 
 } // namespace gta

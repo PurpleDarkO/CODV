@@ -35,6 +35,14 @@ GTA is the world. Every MW2 asset is read from the player's own copy at setup ti
 | Police | Juggernauts far apart at five stars; a 30 s head start after the nuke |
 | Movement | Ladders by holding C; no invisible walls around sprinklers or people lying down |
 
+## In 0.3.1
+
+| Area | What came |
+|---|---|
+| Weapons | MW2's bullet tracers: some of your shots, every round of the killstreaks' heavy guns |
+| HUD | The minimap turns with where you look, like MW2's radar |
+| Setup | Python comes in the release (no download), which ends a Windows Defender false positive |
+
 ## Next
 
 - Movement tuning: the remaining small hitches at car corners and low fences.

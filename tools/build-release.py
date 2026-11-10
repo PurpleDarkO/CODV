@@ -5,9 +5,15 @@
 Writes build/release/CODV-<version>/ and CODV-<version>.zip:
     CODV Setup.cmd, README.md, LICENSE, NOTICE, THIRD-PARTY-NOTICES.txt, SHA256SUMS.txt
     build/package/  CodVLegacy.asi, CodVRuntime.dll, codv-mw2import.exe, codv-gtapack.exe
-    tools/          prepare.py and the setup modules, the wizard, get-python.ps1
+    tools/          prepare.py and the setup modules, the wizard
     data/           weapons.json, CodVHost.ini, mw2.json
+    python/         python.org's embeddable Python (the pin in tools/get-python.ps1, its hash checked)
 The layout mirrors the repository so tools/prepare.py runs unchanged.
+
+The Python ships inside the release instead of being downloaded at setup: a zip holding a setup script that
+downloads and runs something next to executables reads as a trojan dropper to Windows Defender's machine-learning
+heuristics (Trojan:Script/Sabsik.FL.A!ml on 0.3.0), even though every file scans clean on its own. On Windows the
+finished zip is scanned with Defender as a downloaded file, and a detection is reported.
 
 rustc keeps source paths in binaries (panic locations): this writes a machine-local
 .cargo/config.toml (gitignored) that maps this checkout and the user folder to neutral
@@ -18,16 +24,20 @@ No Call of Duty or GTA V data format may be in a release (a final scan refuses t
 import argparse
 import hashlib
 import json
+import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import urllib.request
 import zipfile
 from pathlib import Path
 
 from _common import REPO, sha256_file
 
 PACKAGE_FILES = ['CodVLegacy.asi', 'CodVRuntime.dll', 'codv-mw2import.exe', 'codv-gtapack.exe']
-TOOL_FILES = ['_common.py', 'prepare.py', 'setup_engine.py', 'gta_locate.py', 'setup-wizard.ps1', 'get-python.ps1',
+TOOL_FILES = ['_common.py', 'prepare.py', 'setup_engine.py', 'gta_locate.py', 'setup-wizard.ps1',
               'CodVLegacy.ini.template', 'build-mw2-weapon.py', 'build-mw2-icon.py', 'mw2-wheel-icon.bin']
 DATA_FILES = ['weapons.json', 'CodVHost.ini', 'mw2.json']
 DOCS = ['README.md', 'LICENSE', 'NOTICE']
@@ -51,6 +61,58 @@ def remap_config():
         config.write_text(text, encoding='utf-8')
         return True
     return False
+
+
+def python_pin():
+    """The embeddable Python's URL and SHA-256, from tools/get-python.ps1 (one pin for both)."""
+    text = (REPO / 'tools/get-python.ps1').read_text(encoding='utf-8')
+    url = re.search(r"Url\s*=\s*'([^']+)'", text)
+    sha = re.search(r"Sha\s*=\s*'([0-9a-fA-F]{64})'", text)
+    if not url or not sha:
+        raise SystemExit('tools/get-python.ps1: no Url / Sha pin found')
+    return url.group(1), sha.group(1).lower()
+
+
+def bundle_python(out):
+    """python.org's embeddable Python into <release>/python, as tools/get-python.ps1 lays it out (without its
+    ._pth, so the tools import each other). Downloaded once into build/python-embed/, its hash checked."""
+    url, sha = python_pin()
+    cache = REPO / 'build/python-embed' / url.rsplit('/', 1)[-1]
+    if not cache.is_file() or sha256_file(cache) != sha:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        print(f'downloading {url}', flush=True)
+        with urllib.request.urlopen(url, timeout=120) as r:
+            data = r.read()
+        if hashlib.sha256(data).hexdigest() != sha:
+            raise SystemExit(f'{url} does not match its pinned SHA-256: nothing bundled')
+        cache.write_bytes(data)
+    target = out / 'python'
+    with zipfile.ZipFile(cache) as z:
+        z.extractall(target)
+    for pth in target.glob('python*._pth'):
+        pth.unlink()
+    if not (target / 'python.exe').is_file() or not (target / 'LICENSE.txt').is_file():
+        raise SystemExit('the embeddable Python lacks python.exe or LICENSE.txt')
+
+
+def defender_scan(zip_path):
+    """Windows only: Defender's verdict on the zip as a downloaded file (the mark of the web on a copy), the
+    way a player's PC first sees it. Prints the result; a detection is reported, never fatal."""
+    if os.name != 'nt':
+        return
+    tool = Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Windows Defender/MpCmdRun.exe'
+    if not tool.is_file():
+        print('Defender scan skipped (MpCmdRun.exe not found)')
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = Path(tmp) / zip_path.name
+        shutil.copy2(zip_path, copy)
+        with open(str(copy) + ':Zone.Identifier', 'w', encoding='ascii') as zone:
+            zone.write('[ZoneTransfer]\r\nZoneId=3\r\n')
+        r = subprocess.run([str(tool), '-Scan', '-ScanType', '3', '-File', str(copy), '-DisableRemediation'],
+                           capture_output=True, text=True)
+        clean = 'found no threats' in r.stdout
+        print('Defender: no threats' if clean else 'Defender FLAGGED the zip, do not publish it:\n' + r.stdout)
 
 
 def local_paths(shipped):
@@ -96,6 +158,7 @@ def main():
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
     (out / 'CODV Setup.cmd').write_bytes(SETUP_CMD.encode('ascii'))
+    bundle_python(out)
     # The licenses of every crate linked into the shipped binaries (MIT / Apache-2.0 ask for them).
     subprocess.run([sys.executable, str(REPO / 'tools/third-party-notices.py'), '--out', str(out / 'THIRD-PARTY-NOTICES.txt')],
                    check=True)
@@ -121,6 +184,7 @@ def main():
                 z.write(f, Path(name) / f.relative_to(out))
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     print(f'{out}\n{zip_path}  sha256 {digest}')
+    defender_scan(zip_path)
     return 0
 
 

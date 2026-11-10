@@ -6,6 +6,27 @@ noted with each release: a host and a runtime only work together on the same ABI
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-10
+
+Runtime ABI 10, unchanged. Run the setup again to install it (your `CodVLegacy.ini` settings are kept).
+
+### Added
+- Tracers (menu Weapons, `Tracers`): MW2's bullet tracers, a short bright streak racing from the gun to where
+  the shot struck (from the muzzle's side of the view from the hip, just under the centre aiming down the
+  sights), on about one shot in five like MW2, and on every round of the AC-130, the Chopper Gunner, the
+  Attack Helicopter and the Sentry Gun (longer, hotter). Off, MW2's (the default) or every shot.
+
+### Changed
+- The minimap turns with where you look under MW2's movement, like MW2's radar (menu HUD, `MinimapFollowsView`):
+  it followed GTA's camera, which CODV's view no longer matches, so up on the map was not always ahead. GTA's
+  own minimap in a vehicle, in a killstreak's camera, or with the option off.
+- The release carries its own Python (python.org's embeddable one, in `python\`): setup downloads nothing.
+
+### Fixed
+- Windows Defender flagged the 0.3.0 zip as `Trojan:Script/Sabsik.FL.A!ml` (a false positive of its
+  machine-learning heuristic) and blocked the setup, which closed at once. The setup no longer downloads Python, the
+  pattern the heuristic took for a trojan.
+
 ## [0.3.0] - 2026-11-05
 
 Runtime ABI 10, unchanged (the runtime's additions are optional exports, options and flags). Run the setup
@@ -172,7 +193,8 @@ First public release. Runtime ABI 10.
 - CODV's own missiles have no in-flight sound yet.
 - GTA V Enhanced and GTA Online are not supported.
 
-[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/PurpleDarkO/CODV/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PurpleDarkO/CODV/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/PurpleDarkO/CODV/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/PurpleDarkO/CODV/releases/tag/v0.1.0

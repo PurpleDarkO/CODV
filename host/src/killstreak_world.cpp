@@ -2,6 +2,7 @@
 
 #include "hud_render.h"
 #include "natives.h"
+#include "tracers.h"
 
 #include <main.h>
 
@@ -102,6 +103,8 @@ void Explode(V3 at, int type, float radiusUnits, float shake) {
 void Bullet(V3 from, V3 to, int damage, Hash weapon) {
     Call<void>(gta::SHOOT_SINGLE_BULLET_BETWEEN_COORDS_IGNORE_ENTITY, from.x, from.y, from.z, to.x, to.y, to.z, damage, TRUE,
                weapon, 0, TRUE, FALSE, -1.0f, 0, 0);
+    const float a[3] = {from.x, from.y, from.z}, b[3] = {to.x, to.y, to.z};
+    tracers::Shot(a, b, true); // the heavy guns: a tracer with every round
 }
 
 void FofTargets(Ped player, V3 around, float range, CvStreakView& view) {

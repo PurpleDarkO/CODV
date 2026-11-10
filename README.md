@@ -35,7 +35,8 @@ each phase: docs/ROADMAP.md. What changed in each release: CHANGELOG.md.
 3. Check the **GTA V Legacy** and **Modern Warfare 2** folders (setup finds them on Steam, the Rockstar Games
    Launcher or Epic when it can) and press **Install**. If the GTA folder is protected (Program Files and
    similar), setup offers to restart as administrator; if it stops, pressing Install again picks up where it left
-   off. Setup downloads a private Python (about 11 MB, python.org) only if your PC has none.
+   off. Setup runs on the private Python that comes in the release (python.org's embeddable one, in `python\`):
+   nothing is downloaded and nothing is installed on your PC.
 4. Start GTA V Legacy Story Mode with BattlEye off and pick **MW2** in the weapon wheel (or press F10).
 
 Setup writes `CodVLegacy.asi`, `CodVRuntime.dll`, `CodVHost.ini` and `CodVLegacy.ini` next to `GTA5.exe`, CODV's
@@ -149,10 +150,10 @@ switch and six sections (right / A / Enter opens one, B / Backspace goes back):
 
 | Section | Settings |
 |---|---|
-| Weapons | weapon sets, random guns, primary / secondary, Stinger / Javelin missiles, spare ammo, grenades carried, lethal (frag / Semtex / C4 / Claymore / throwing knife), tactical (flashbang / stun / smoke), Scavenger, number keys, recoil, damage, shots (below), weapon volume |
+| Weapons | weapon sets, random guns, primary / secondary, Stinger / Javelin missiles, spare ammo, grenades carried, lethal (frag / Semtex / C4 / Claymore / throwing knife), tactical (flashbang / stun / smoke), Scavenger, number keys, recoil, damage, tracers, shots (below), weapon volume |
 | Movement | reload while sprinting, MW2 movement, mouse sensitivity, invert look, field of view, third person, sprint speed and time, jump height, MW2's jump slowdown, fall damage, smooth collision, quick jump, forced first person |
 | Parkour | slide (speed, length), dive, auto vault (from what height), mantle speed, high climb (up to what height), movement sounds |
-| HUD | MW2's HUD, stamina bar, crosshair, hitmarker, hit sounds, gun lighting, gun over radar, body animation, debug overlay |
+| HUD | MW2's HUD, stamina bar, crosshair, hitmarker, hit sounds, gun lighting, gun over radar, minimap follows view, body animation, debug overlay |
 | Killstreaks | killstreaks on / off, all ten or three picks, the three rewards, the EMP's kill count |
 | Game | regenerating health, starting with CODV on, missions, police Juggernauts |
 
