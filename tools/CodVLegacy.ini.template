@@ -24,6 +24,15 @@ Secondary=-1
 ; Frags: frag grenades carried (G / RB: hold to cook, release to throw).
 Mw2Primary=-1
 Mw2Secondary=-1
+; MW2's attachments, two per gun (the menu sets these): 0 none, 1 red dot, 2 holographic, 3 ACOG, 4 thermal,
+; 5 silencer, 6 FMJ, 7 extended mags, 8 heartbeat sensor, 9 grenade launcher, 10 shotgun, 11 rapid fire, 12 grip,
+; 13 akimbo, 14 tactical knife. The gun becomes MW2's variant with them; a gun without one keeps the closest it has.
+; Used with RandomLoadout=0 (with WeaponSets, on the guns leading keys 1 and 2; the other guns of each key come with
+; random attachments); RandomLoadout=1 gives every gun random attachments.
+Mw2PrimaryAttach=0
+Mw2PrimaryAttach2=0
+Mw2SecondaryAttach=0
+Mw2SecondaryAttach2=0
 AmmoScale=3
 Frags=2
 ; Lethal: what G / RB throws, with MW2's animation and HUD icon (Frags is how many you carry).

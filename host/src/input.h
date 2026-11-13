@@ -29,6 +29,8 @@ inline constexpr int kSlotKeys[4] = {157, 158, 160, 165};
 inline constexpr int kEquipmentKey = 159;
 // T (GTA's MP_TEXT_CHAT_ALL, unused in story mode): MW2's special grenade under MW2.
 inline constexpr int kTacticalKey = 245;
+// X (GTA's VEH_DUCK, unused on foot): the gun's underbarrel weapon (grenade launcher, shotgun) and back.
+inline constexpr int kAlternateKey = 73;
 
 struct Binding {
     int control;

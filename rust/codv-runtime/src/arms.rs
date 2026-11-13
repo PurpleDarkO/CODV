@@ -72,6 +72,79 @@ pub const MENU_GUNS: &[&str] = &[
     "deserteagle",
     "deserteaglegold",
 ];
+/// MW2's attachments, as its multiplayer weapon names spell them, in the menu's order
+/// (CV_OPT_MW2_ATTACH_*: 0 none, then 1.. these). A gun with attachments is its own weapon in MW2:
+/// the base name, the attachments in alphabetical order, "_mp" (m4_acog_heartbeat_mp), with its own
+/// numbers, sounds and the same view model showing the attachments' parts (hide_tags).
+pub const ATTACHMENTS: &[&str] = &[
+    "reflex",
+    "eotech",
+    "acog",
+    "thermal",
+    "silencer",
+    "fmj",
+    "xmags",
+    "heartbeat",
+    "gl",
+    "shotgun",
+    "rof",
+    "grip",
+    "akimbo",
+    "tactical",
+];
+
+/// MW2's weapon name for `base` with `parts` (any order; empties and repeats left out).
+pub fn variant_name(base: &str, parts: &[&str]) -> String {
+    let mut p: Vec<&str> = parts.iter().copied().filter(|s| !s.is_empty()).collect();
+    p.sort_unstable();
+    p.dedup();
+    if p.is_empty() { format!("{base}_mp") } else { format!("{base}_{}_mp", p.join("_")) }
+}
+
+/// The attachments in MW2 weapon `name` of gun `base` (none for the bare gun; None: not a variant of it, or
+/// a part that is no attachment).
+pub fn attachment_parts<'a>(base: &str, name: &'a str) -> Option<Vec<&'a str>> {
+    let rest = name.strip_prefix(base)?.strip_suffix("_mp")?;
+    if rest.is_empty() {
+        return Some(Vec::new());
+    }
+    let parts: Vec<&str> = rest.strip_prefix('_')?.split('_').collect();
+    parts.iter().all(|p| ATTACHMENTS.contains(p)).then_some(parts)
+}
+
+/// The attachments a random gun never comes with until they work in CODV (akimbo shows one gun).
+pub const RANDOM_ATTACHMENTS_SKIPPED: &[&str] = &["akimbo"];
+
+/// How a random gun comes, as a roll of 0..100: bare below this, one attachment below the next, else two
+/// (the most a gun takes in MW2).
+const RANDOM_BARE: u32 = 15;
+const RANDOM_ONE: u32 = 55;
+
+/// A random gun's variant from `variants` (weapon id, attachment count): the bare gun, one attachment or
+/// two (RANDOM_BARE, RANDOM_ONE), the next fewer when the gun has none with that many.
+fn pick_variant(rng: &mut u32, variants: &[(u32, usize)]) -> Option<u32> {
+    let roll = xorshift(rng) % 100;
+    let want = if roll < RANDOM_BARE {
+        0
+    } else if roll < RANDOM_ONE {
+        1
+    } else {
+        2
+    };
+    for count in (0..=want).rev() {
+        let pool: Vec<u32> = variants.iter().filter(|v| v.1 == count).map(|v| v.0).collect();
+        if !pool.is_empty() {
+            return Some(pick(rng, &pool));
+        }
+    }
+    None
+}
+
+/// A gun's base name: m4 for m4_acog_heartbeat_mp.
+pub fn base_name(name: &str) -> &str {
+    name.split('_').next().unwrap_or(name)
+}
+
 /// How many of MENU_GUNS are primaries (assault rifles to snipers); the rest
 /// (shotguns, machine pistols, handguns) are MW2's secondaries.
 pub const MENU_PRIMARIES: usize = 23;
@@ -100,6 +173,8 @@ pub const TACTICAL_COUNT: i32 = 2;
 /// the knife (melee on the trigger) and the frag in hand (thrown on the trigger).
 pub const REQUEST_KNIFE: u32 = 0x100;
 pub const REQUEST_GRENADE: u32 = 0x101;
+/// MW2's switch to the held gun's underbarrel weapon (the grenade launcher, the shotgun) and back.
+pub const REQUEST_ALTERNATE: u32 = 0x102;
 /// Retail button bits (playerstate_iw4::buttons).
 const BUTTON_ATTACK: u32 = 0x1;
 const BUTTON_MELEE: u32 = 0x4;
@@ -187,6 +262,8 @@ pub struct Arms {
     pub hand: Hand,
     /// xorshift state for random loadouts.
     rng: u32,
+    /// The attachments asked for, primary [0] and secondary [1], two each (0 none, 1.. ATTACHMENTS).
+    attach: [[usize; 2]; 2],
     /// CODV's weapon sets: the loadout is SETS groups back to back (`set_len` guns each), a number
     /// key takes its group's last gun and, pressed again, the group's next one.
     pub sets: bool,
@@ -223,13 +300,18 @@ impl Arms {
         let root = root?;
         let path = root.join("mw2").join("weapons.json");
         let text = std::fs::read_to_string(&path).ok()?;
-        let table = match codv_mw2data::table::from_json(&text) {
+        let mut table = match codv_mw2data::table::from_json(&text) {
             Ok(t) => t,
             Err(e) => {
                 log(&format!("mw2: {} unreadable ({e}); interim gunplay", path.display()));
                 return None;
             }
         };
+        // Attachment variants that sound as their gun: the sounds MW2's zones leave to the base.
+        let filled = codv_mw2data::table::fill_variant_sounds(&mut table);
+        if filled > 0 {
+            log(&format!("mw2: {filled} attachment variant sounds taken from their base guns"));
+        }
         let config_text = std::fs::read_to_string(root.join("mw2.json")).unwrap_or_else(|_| DEFAULT_CONFIG.to_owned());
         let config = json::parse(&config_text).or_else(|_| json::parse(DEFAULT_CONFIG)).ok()?;
         let (arsenal, refused) = Arsenal::from_table(&table);
@@ -242,14 +324,20 @@ impl Arms {
         let find = |list: &[(String, Value)], key: &str| {
             list.iter().find(|(k, _)| k == key).and_then(|(_, v)| v.as_str()).map(joaat)
         };
+        // An underbarrel weapon borrows its class's GTA weapon (the grenade launcher, a shotgun), not its gun's.
         let gta = arsenal
             .guns()
             .iter()
-            .map(|g| {
+            .enumerate()
+            .map(|(i, g)| {
                 let base = g.name.split('_').next().unwrap_or("");
-                find(by_base, base)
-                    .or_else(|| find(by_class, &g.facts.weap_class.to_string()))
-                    .unwrap_or_else(|| joaat("weapon_carbinerifle"))
+                let class = || find(by_class, &g.facts.weap_class.to_string());
+                if arsenal.is_underbarrel(i as u32 + 1) {
+                    class().or_else(|| find(by_base, base))
+                } else {
+                    find(by_base, base).or_else(class)
+                }
+                .unwrap_or_else(|| joaat("weapon_carbinerifle"))
             })
             .collect();
         let labels = arsenal.guns().iter().map(|g| label(&g.display_name, &g.name)).collect();
@@ -321,6 +409,7 @@ impl Arms {
             hits: 0,
             kills: 0,
             rng,
+            attach: [[0; 2]; 2],
             sets: false,
             reload_sprint: false,
             set_len: [0; SETS],
@@ -380,6 +469,10 @@ impl Arms {
             // The frag in hand only while there is one (and not mid-throw).
             REQUEST_GRENADE if g.frags() > 0 => self.hand = Hand::Grenade,
             REQUEST_GRENADE => {}
+            REQUEST_ALTERNATE => {
+                self.hand = Hand::Gun;
+                g.switch_alternate();
+            }
             _ if pick.is_some() => {
                 self.hand = Hand::Gun;
                 g.select(self.selected)
@@ -397,6 +490,19 @@ impl Arms {
         }
         g.reload_sprint = self.reload_sprint;
         g.arm(player, arsenal);
+    }
+
+    /// The underbarrel switch just asked for, for the log: from what to what, or why nothing.
+    pub fn alternate_note(&self) -> String {
+        let name = |id: u32| self.arsenal.gun(id).map_or_else(|| "nothing".to_owned(), |g| g.name.clone());
+        let Some(g) = self.gunner.as_ref() else { return "mw2: underbarrel: no gunner".into() };
+        let held = g.held();
+        let want = g.wanted();
+        if want != held {
+            format!("mw2: underbarrel: {} -> {}", name(held), name(want))
+        } else {
+            format!("mw2: underbarrel: {} has none (the grenade launcher or the shotgun attachment)", name(held))
+        }
     }
 
     /// The gun last asked for by name (weapon sets' tests).
@@ -491,8 +597,87 @@ impl Arms {
 
     /// Loadout slot `slot` (0 primary, 1 secondary) becomes the menu's gun
     /// `index`; the player gets a fresh loadout (the new gun is raised).
+    /// Gun `id` (any variant) with slot `slot`'s attachments: both when the player's MW2 has that pair,
+    /// else the first alone, else the second alone, else the bare gun (as MW2 itself offers them).
+    fn dressed(&self, slot: usize, id: u32) -> u32 {
+        let Some(gun) = self.arsenal.gun(id) else { return id };
+        let base = base_name(&gun.name).to_owned();
+        let part = |k: usize| {
+            self.attach
+                .get(slot)
+                .and_then(|a| a.get(k))
+                .copied()
+                .filter(|&v| v > 0)
+                .and_then(|v| ATTACHMENTS.get(v - 1))
+                .copied()
+                .unwrap_or("")
+        };
+        let (a, b) = (part(0), part(1));
+        for parts in [[a, b], [a, ""], ["", b], ["", ""]] {
+            if let Some(found) = self.arsenal.id(&variant_name(&base, &parts)) {
+                return found;
+            }
+        }
+        id
+    }
+
+    /// Attachment `which` (0, 1) of slot `slot` (0 primary, 1 secondary) to `value` (0 none, 1..
+    /// ATTACHMENTS): the slot's gun becomes its MW2 variant with them. The gun's name now, None when
+    /// the arguments are out of range or the slot is empty.
+    pub fn set_attachment(&mut self, slot: usize, which: usize, value: usize) -> Option<String> {
+        if slot > 1 || which > 1 || value > ATTACHMENTS.len() {
+            return None;
+        }
+        let at = if self.sets { self.set_start(slot) } else { slot };
+        if self.attach[slot][which] == value {
+            // Unchanged (the options applied again): the gun keeps what it has, a random gun its random
+            // attachments.
+            let id = *self.loadout.get(at)?;
+            return self.arsenal.gun(id).map(|g| g.name.clone());
+        }
+        self.attach[slot][which] = value;
+        let at = if self.sets {
+            if self.set_len[slot] == 0 {
+                return None;
+            }
+            self.set_start(slot)
+        } else {
+            slot
+        };
+        let current = *self.loadout.get(at)?;
+        let id = self.dressed(slot, current);
+        if id != current {
+            self.loadout[at] = id;
+            self.fresh();
+        }
+        self.arsenal.gun(id).map(|g| g.name.clone())
+    }
+
+    /// A random gun's attachments (random guns, weapon sets): a random pick of the variants the player's MW2
+    /// has of it (pick_variant; none of RANDOM_ATTACHMENTS_SKIPPED). The menu's attachments are for chosen
+    /// guns: the host leaves them out with random guns.
+    fn random_dress(&mut self, id: u32) -> u32 {
+        let Some(gun) = self.arsenal.gun(id) else { return id };
+        let base = base_name(&gun.name).to_owned();
+        let variants: Vec<(u32, usize)> = self
+            .arsenal
+            .guns()
+            .iter()
+            .filter(|g| base_name(&g.name) == base)
+            .filter_map(|g| {
+                let parts = attachment_parts(&base, &g.name)?;
+                if parts.len() > 2 || parts.iter().any(|p| RANDOM_ATTACHMENTS_SKIPPED.contains(p)) {
+                    return None;
+                }
+                Some((self.arsenal.id(&g.name)?, parts.len()))
+            })
+            .collect();
+        pick_variant(&mut self.rng, &variants).unwrap_or(id)
+    }
+
     pub fn set_slot(&mut self, slot: usize, index: usize) -> bool {
         let Some(&id) = self.menu.get(index) else { return false };
+        let id = if slot < 2 { self.dressed(slot, id) } else { id };
         if self.sets {
             // Weapon sets: the gun leads its group (swapped in when the group already has it).
             if self.set_len.get(slot).is_none_or(|&l| l == 0) {
@@ -551,6 +736,10 @@ impl Arms {
                     break;
                 }
             }
+            // Each gun with random attachments (MW2's variants).
+            for id in loadout.iter_mut() {
+                *id = self.random_dress(*id);
+            }
             self.loadout = loadout;
             self.fresh();
             return Some(self.all_names());
@@ -572,6 +761,10 @@ impl Arms {
                 break;
             }
             loadout = roll(&mut self.rng);
+        }
+        // Each gun with its attachments (MW2's variants; the launcher has none).
+        for id in loadout.iter_mut() {
+            *id = self.random_dress(*id);
         }
         self.loadout = loadout;
         self.fresh();
@@ -616,7 +809,9 @@ impl Arms {
     /// gives them and keeps their models loaded, so a switch never waits for GTA's streaming.
     pub fn ready_gta_hashes(&self) -> Vec<u32> {
         let mut out = Vec::new();
-        for &id in &self.loadout {
+        // The guns' underbarrel weapons too (the grenade launcher's GTA stand-in).
+        let alts: Vec<u32> = self.loadout.iter().filter_map(|&id| self.arsenal.alternate(id)).collect();
+        for &id in self.loadout.iter().chain(&alts) {
             let h = self.gta_hash(id);
             if h != 0 && !out.contains(&h) {
                 out.push(h);
@@ -630,7 +825,9 @@ impl Arms {
     pub fn ready_set(&self) -> Vec<&Gun> {
         let frag = self.arsenal.offhand_id(self.lethal_name()).and_then(|id| self.arsenal.any(id));
         let tactical = self.arsenal.offhand_id(self.tactical_name()).and_then(|id| self.arsenal.any(id));
-        self.loadout.iter().filter_map(|&id| self.arsenal.gun(id)).chain(frag).chain(tactical).collect()
+        let alts =
+            self.loadout.iter().filter_map(|&id| self.arsenal.alternate(id)).filter_map(|id| self.arsenal.gun(id));
+        self.loadout.iter().filter_map(|&id| self.arsenal.gun(id)).chain(alts).chain(frag).chain(tactical).collect()
     }
 
     /// The frag button's grenade by name: LETHALS[lethal] when the player's MW2 import has it, else the frag.
@@ -860,6 +1057,51 @@ mod tests {
     fn joaat_matches_gta() {
         assert_eq!(joaat("weapon_unarmed"), 0xA271_9263);
         assert_eq!(joaat("WEAPON_CARBINERIFLE"), 2_210_333_304);
+    }
+
+    #[test]
+    fn attachment_variants_spell_as_mw2() {
+        assert_eq!(variant_name("m4", &[]), "m4_mp");
+        assert_eq!(variant_name("m4", &["", ""]), "m4_mp");
+        assert_eq!(variant_name("m4", &["shotgun", ""]), "m4_shotgun_mp");
+        assert_eq!(variant_name("m4", &["heartbeat", "acog"]), "m4_acog_heartbeat_mp");
+        assert_eq!(variant_name("masada", &["acog", "heartbeat"]), "masada_acog_heartbeat_mp");
+        assert_eq!(variant_name("m4", &["acog", "acog"]), "m4_acog_mp");
+        assert_eq!(base_name("m4_acog_heartbeat_mp"), "m4");
+        assert_eq!(base_name("deserteaglegold_mp"), "deserteaglegold");
+        assert!(ATTACHMENTS.contains(&"heartbeat") && ATTACHMENTS.contains(&"shotgun"));
+    }
+
+    #[test]
+    fn variants_name_their_attachments() {
+        assert_eq!(attachment_parts("m4", "m4_mp"), Some(vec![]));
+        assert_eq!(attachment_parts("m4", "m4_acog_silencer_mp"), Some(vec!["acog", "silencer"]));
+        assert_eq!(attachment_parts("m4", "m4_gl_mp"), Some(vec!["gl"]));
+        assert_eq!(attachment_parts("m4", "m40a3_mp"), None);
+        assert_eq!(attachment_parts("m4", "m4_shotgun_attach_mp"), None);
+        assert_eq!(attachment_parts("deserteagle", "deserteaglegold_mp"), None);
+    }
+
+    #[test]
+    fn random_guns_come_with_attachments() {
+        let variants = [(1, 0), (2, 1), (3, 1), (4, 2), (5, 2), (6, 2)];
+        let mut rng = 0x1234_5678;
+        let mut counts = [0; 3];
+        for _ in 0..1000 {
+            let id = pick_variant(&mut rng, &variants).unwrap();
+            counts[variants.iter().find(|v| v.0 == id).unwrap().1] += 1;
+        }
+        // About 15% bare, 40% one attachment, 45% two.
+        assert!((80..220).contains(&counts[0]), "{counts:?}");
+        assert!((320..480).contains(&counts[1]), "{counts:?}");
+        assert!((370..530).contains(&counts[2]), "{counts:?}");
+        // A gun with no two-attachment variant: one, else bare; a gun with none at all: bare.
+        let few = [(1, 0), (2, 1)];
+        for _ in 0..50 {
+            assert!(pick_variant(&mut rng, &few).is_some());
+        }
+        assert_eq!(pick_variant(&mut rng, &[(9, 0)]), Some(9));
+        assert_eq!(pick_variant(&mut rng, &[]), None);
     }
 
     #[test]

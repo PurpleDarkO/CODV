@@ -10,6 +10,7 @@
 #include "gta_audio.h"
 #include "grenade_feed.h"
 #include "gunplay.h"
+#include "heartbeat.h"
 #include "pack_loader.h"
 #include "host_data.h"
 #include "host_util.h"
@@ -88,6 +89,13 @@ std::wstring LogDir() {
     return dir;
 }
 
+// MW2's attachments in the runtime's order (CV_OPT_MW2_ATTACH_*), and their INI keys.
+const std::vector<std::string> kAttachmentNames = {
+    "None",          "Red Dot Sight",    "Holographic Sight", "ACOG Scope", "Thermal",    "Silencer", "FMJ",
+    "Extended Mags", "Heartbeat Sensor", "Grenade Launcher",  "Shotgun",    "Rapid Fire", "Grip",     "Akimbo",
+    "Tactical Knife"};
+constexpr const char* kAttachKeys[4] = {"Mw2PrimaryAttach", "Mw2PrimaryAttach2", "Mw2SecondaryAttach", "Mw2SecondaryAttach2"};
+
 struct Config {
     // enabled: CODV mode right now (session only). It starts as StartEnabled
     // and flips with ToggleKey / ToggleChord or the menu's first item.
@@ -125,6 +133,8 @@ struct Config {
     // MW2 (with the import): the menu's guns for the two slots (-1: mw2.json's loadout),
     // spare rounds times AmmoScale and Frags carried.
     int mw2Primary = -1, mw2Secondary = -1;
+    // MW2's attachments: primary 1, 2, secondary 1, 2 (0 none, 1.. kAttachmentNames).
+    int mw2Attach[4] = {0, 0, 0, 0};
     // A random MW2 primary and secondary each time the mode is switched on (RandomLoadout).
     bool randomLoadout = true;
     // Weapon sets: three random guns behind each number key, new ones at each switch-on (WeaponSets).
@@ -258,6 +268,9 @@ Config LoadConfig() {
     c.recoil = std::clamp(util::IniFloat(ini, "RecoilScale", 1.0f), 0.25f, 2.0f);
     c.mw2Primary = static_cast<int>(util::IniFloat(ini, "Mw2Primary", -1.0f));
     c.mw2Secondary = static_cast<int>(util::IniFloat(ini, "Mw2Secondary", -1.0f));
+    for (int i = 0; i < 4; ++i)
+        c.mw2Attach[i] = std::clamp(static_cast<int>(util::IniFloat(ini, kAttachKeys[i], 0.0f)), 0,
+                                    static_cast<int>(kAttachmentNames.size()) - 1);
     c.randomLoadout = util::IniFlag(ini, "RandomLoadout", c.randomLoadout);
     c.weaponSets = util::IniFlag(ini, "WeaponSets", c.weaponSets);
     c.ownMissiles = util::IniFlag(ini, "Mw2Missiles", c.ownMissiles);
@@ -330,6 +343,22 @@ const std::vector<std::string> kRewardNames = {"Off",
 
 // New random guns at each switch-on: RandomLoadout, and always with weapon sets.
 bool RandomGuns(const Config& c) { return c.randomLoadout || c.weaponSets; }
+// The guns and attachments picked in the menu hold unless RandomLoadout is on (with weapon sets they lead keys
+// 1 and 2, the rest of each key's guns rolled at random).
+bool ChosenGuns(const Config& c) { return !c.randomLoadout; }
+void ApplyChosenGuns(const Config& c) {
+    if (!ChosenGuns(c)) return;
+    if (c.mw2Primary >= 0) g_runtime.SetOption(CV_OPT_MW2_PRIMARY, static_cast<float>(c.mw2Primary));
+    if (c.mw2Secondary >= 0) g_runtime.SetOption(CV_OPT_MW2_SECONDARY, static_cast<float>(c.mw2Secondary));
+    // The attachments after the guns (each dresses the gun in its slot).
+    for (int i = 0; i < 4; ++i)
+        g_runtime.SetOption(static_cast<CvOption>(CV_OPT_MW2_ATTACH_PRIMARY_1 + i), static_cast<float>(c.mw2Attach[i]));
+}
+// New random guns now (weapon sets, RandomLoadout), the menu's picks back on top of them.
+void Randomize(const Config& c) {
+    g_runtime.SetOption(CV_OPT_MW2_RANDOMIZE, 1.0f);
+    ApplyChosenGuns(c);
+}
 
 // Killstreaks and the kill counter belong to Free Roam.
 bool Streaks(const Config& c) {
@@ -379,11 +408,9 @@ void ApplyOptions(const Config& c) {
     g_runtime.SetOption(CV_OPT_KS_EMP_KILLS, static_cast<float>(c.empKills));
     // Weapon sets before the saved guns (a switch lays the loadout out anew).
     g_runtime.SetOption(CV_OPT_WEAPON_SETS, c.weaponSets ? 1.0f : 0.0f);
-    // The saved MW2 guns, unless each switch-on rolls new ones (the menu still sets them live).
-    if (!RandomGuns(c)) {
-        if (c.mw2Primary >= 0) g_runtime.SetOption(CV_OPT_MW2_PRIMARY, static_cast<float>(c.mw2Primary));
-        if (c.mw2Secondary >= 0) g_runtime.SetOption(CV_OPT_MW2_SECONDARY, static_cast<float>(c.mw2Secondary));
-    }
+    // The saved MW2 guns and attachments, unless RandomLoadout rolls them all (random guns come with random
+    // attachments; the menu still sets them live).
+    ApplyChosenGuns(c);
     if (c.primary >= 0) g_runtime.SetOption(CV_OPT_PRIMARY, static_cast<float>(c.primary));
     if (c.secondary >= 0) g_runtime.SetOption(CV_OPT_SECONDARY, static_cast<float>(c.secondary));
 }
@@ -450,8 +477,8 @@ const Description kDescriptions[] = {
     {"RandomLoadout", "Random guns", "New random MW2 guns each time CODV is switched on."},
     {"WeaponSets", "Weapon sets", "Three random guns behind each number key; press it again for the next one."},
     {"Mw2Missiles", "Long-range missiles", "Locked Stinger and Javelin shots fly CODV's own missiles, about 3 km."},
-    {"Mw2Primary", "Primary", "Your primary MW2 gun (with random guns off)."},
-    {"Mw2Secondary", "Secondary", "Your secondary MW2 gun (with random guns off)."},
+    {"Mw2Primary", "Primary", "Your primary MW2 gun (with random guns off; with weapon sets it leads key 1)."},
+    {"Mw2Secondary", "Secondary", "Your secondary MW2 gun (with random guns off; with weapon sets it leads key 2)."},
     {"AmmoScale", "Spare ammo", "Spare magazines carried, times MW2's (1 = MW2)."},
     {"Frags", "Grenades carried", "How many of the lethal below you carry (G / RB)."},
     {"Lethal", "Lethal", "G / RB: frag (cooks), Semtex (sticks), C4 (6 or R twice sets it off), Claymore or throwing knife."},
@@ -548,6 +575,15 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     // Item 0 is the live mode (not saved; ScriptMain keeps it in sync with the toggle).
     items.push_back(menu::Flag("CODV mode", "", c.enabled, [](float) { g_modeToggle = true; }));
     items.back().help = "Switch CODV on or off (also F10, Back + RB, or MW2 in GTA's weapon wheel).";
+#if CODV_EXPERIMENTAL
+    // The game mode (experimental builds): Free Roam or a zombie mode, right under the mode switch.
+    items.push_back(menu::Choice("Game mode", "GameMode", c.gameMode, experimental::kModeNames,
+                                 apply([&c](float v) {
+                                     c.gameMode = experimental::ClampMode(static_cast<int>(v));
+                                     c.playMode = experimental::FirstPlayMode(c.gameMode);
+                                 })));
+    items.back().help = experimental::kModeHelp;
+#endif
     items.push_back(menu::Section("Weapons"));
     if (!mw2Guns.empty()) {
         // MW2's weapons (the import): any base gun in either slot, the spare rounds, the frags.
@@ -557,9 +593,13 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
         const int s = c.mw2Secondary >= 0 ? c.mw2Secondary : IndexOf(mw2Guns, "usp_mp", 0);
         items.push_back(menu::Flag("Random guns at each switch-on", "RandomLoadout", c.randomLoadout, [&c](float v) {
             c.randomLoadout = v != 0;
-            // Turned on with the mode off: roll the next switch-on's guns now.
+            // Turned on with the mode off: roll the next switch-on's guns now. Turned off: the menu's guns and
+            // attachments at once.
             if (c.randomLoadout && !c.enabled) {
-                g_runtime.SetOption(CV_OPT_MW2_RANDOMIZE, 1.0f);
+                Randomize(c);
+                vmfeed::Prewarm(g_runtime);
+            } else if (!c.randomLoadout) {
+                ApplyChosenGuns(c);
                 vmfeed::Prewarm(g_runtime);
             }
         }));
@@ -586,6 +626,23 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
             g_runtime.SetOption(CV_OPT_MW2_SECONDARY, v);
             vmfeed::Prewarm(g_runtime);
         }));
+        // MW2's attachments, two per gun (MW2's own variants: their parts on the gun, their numbers and sounds).
+        static const char* const kAttachLabels[4] = {"Primary attachment", "Primary attachment 2", "Secondary attachment",
+                                                     "Secondary attachment 2"};
+        for (int i = 0; i < 4; ++i) {
+            items.push_back(menu::Choice(kAttachLabels[i], kAttachKeys[i], c.mw2Attach[i], kAttachmentNames, [&c, i](float v) {
+                c.mw2Attach[i] = static_cast<int>(v);
+                if (!ChosenGuns(c)) return; // RandomLoadout: random attachments
+                g_runtime.SetOption(static_cast<CvOption>(CV_OPT_MW2_ATTACH_PRIMARY_1 + i), v);
+                vmfeed::Prewarm(g_runtime);
+            }));
+            items.back().help = "MW2's attachments, as MW2 offers them per class: rifles take sights, silencer, FMJ, "
+                                "extended mags, heartbeat, grenade launcher, shotgun; SMGs rapid fire and akimbo too; LMGs "
+                                "grip; pistols tactical knife and akimbo. One the gun lacks (or that pair) falls back to the "
+                                "closest it has. X (D-pad down) switches to the grenade launcher or the shotgun and back. Used "
+                                "with random guns off (then random guns come with random attachments); with weapon "
+                                "sets, on the gun leading key 1 or 2.";
+        }
         items.push_back(menu::Number("Spare ammo", "AmmoScale", c.ammoScale, 1.0f, 10.0f, 1.0f, "x%.0f",
                                      apply([&c](float v) { c.ammoScale = v; })));
         items.push_back(menu::Number("Grenades carried", "Frags", static_cast<float>(c.frags), 0.0f, 10.0f, 1.0f, "%.0f",
@@ -730,14 +787,8 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     items.push_back(menu::Action("Test: spawn a minigun Juggernaut", [](float) { jugg::RequestTestSpawn(true); }));
     items.back().help = "The rare one (1% of Juggernauts): a minigun instead of the heavy machine gun.";
 #if CODV_EXPERIMENTAL
-    // Zombies (experimental builds): the game mode and everything about the zombie modes in one page.
+    // Zombies (experimental builds): everything about the zombie modes in one page (the game mode is at the top).
     items.push_back(menu::Section("Zombies"));
-    items.push_back(menu::Choice("Game mode", "GameMode", c.gameMode, experimental::kModeNames,
-                                 apply([&c](float v) {
-                                     c.gameMode = experimental::ClampMode(static_cast<int>(v));
-                                     c.playMode = experimental::FirstPlayMode(c.gameMode);
-                                 })));
-    items.back().help = experimental::kModeHelp;
     items.push_back(menu::Choice("Wrecked streets", "Wrecks", wrecks::g_density, experimental::kWreckNames,
                                  [](float v) { wrecks::g_density = wrecks::ClampDensity(static_cast<int>(v)); }));
     items.back().help = experimental::kWreckHelp;
@@ -753,10 +804,15 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     items.back().help = "In Survival: a survivor cornered by zombies calls for help nearby now (green dot on the radar).";
     items.push_back(menu::Action("Test: fuel tanker", [](float) { survival::RequestEventTest(survival::Extra::Tanker); }));
     items.back().help = "In Survival: a leaking fuel tanker stands on a road 130 to 190 m off now (red dot): lure them in, shoot it.";
+    items.push_back(menu::Action("Test: raiders", [](float) { survival::RequestEventTest(survival::Extra::Raiders); }));
+    items.back().help = "In Survival: raiders come for you now (a biker gang, armed hillbillies or scavengers; pink dots). In a run they "
+                        "are rare: from wave 3, 8 minutes at least between two bands.";
     items.push_back(menu::Action("Test: special horde", [](float) { survival::RequestTwistTest(survival::Twist::Horde); }));
     items.back().help = "In a Survival wave: a horde of one kind (sprinters, dogs, leapers or brutes) comes a few seconds from now.";
     items.push_back(menu::Action("Test: fog / blood night", [](float) { survival::RequestTwistTest(survival::Twist::Fog); }));
     items.back().help = "In a Survival wave: a thick fog rolls in, then a blood night the next time (100 s each).";
+    items.push_back(menu::Action("Test: headshot gore", [](float) { survival::RequestGoreTest(); }));
+    items.back().help = "In Survival, for 60 s: every head shot that kills a zombie takes its head off (the log says whether it held).";
 #endif
     Describe(m);
     return m;
@@ -815,7 +871,7 @@ void ScriptMain() {
     } else {
         Logf("CODV: runtime ABI %u loaded; data %s", g_runtime.ApiVersion(), cfg.dataRoot.c_str());
         ApplyOptions(cfg);
-        if (RandomGuns(cfg)) g_runtime.SetOption(CV_OPT_MW2_RANDOMIZE, 1.0f);
+        if (RandomGuns(cfg)) Randomize(cfg);
     }
     // GTA's loaded collision for the MW2 player's world (Sol4ra's reader, via SK8V).
     const bool liveCollision = cfg.liveCollision && g_runtime.IsLoaded();
@@ -862,6 +918,14 @@ void ScriptMain() {
     bool modeSwitchedOff = false; // this frame: the killstreak count restarts
     bool remoteView = false;      // a killstreak's camera had the view last frame
     bool minimapLocked = false;   // GTA's minimap held to CODV's view (MinimapFollowsView)
+    bool thermalScope = false;    // GTA's thermal view on for MW2's thermal scope
+    // MW2's thermal scope: GTA's thermal view while scoped through it (off again as the scope goes).
+    auto ThermalScope = [&](bool on) {
+        if (on == thermalScope) return;
+        thermalScope = on;
+        Call<void>(gta::SET_SEETHROUGH, on ? TRUE : FALSE);
+        Log(on ? "CODV: thermal scope on" : "CODV: thermal scope off");
+    };
     CvOutput last{};        // last frame's output (control policy)
     const auto save = [](const std::string& key, const std::string& value) {
         if (key.empty()) return; // live-only item
@@ -888,7 +952,7 @@ void ScriptMain() {
             // The next switch-on's random guns are rolled now, so their view models, sounds and
             // images are read in the background while the mode is off (no hitch when it comes on).
             if (RandomGuns(cfg)) {
-                g_runtime.SetOption(CV_OPT_MW2_RANDOMIZE, 1.0f);
+                Randomize(cfg);
                 vmfeed::Prewarm(g_runtime);
             }
         }
@@ -1015,6 +1079,7 @@ void ScriptMain() {
             if (!remote && !mw2drv.Active()) Call<void>(gta::RENDER_SCRIPT_CAMS, FALSE, FALSE, 0, TRUE, FALSE, 0);
         }
         if (!want) {
+            ThermalScope(false);
             vmfeed::Update(g_runtime, vmfeed::Input{});
             vmfeed::UpdateHud(g_runtime, vmfeed::HudInput{});
             bodyfeed::Tick(g_runtime, player, false, 0.0f, Log);
@@ -1035,6 +1100,8 @@ void ScriptMain() {
             Log("CODV: driving the player");
         }
         if (remoteView) {
+            // The killstreak's camera has its own thermal view: the scope's is forgotten, not switched off.
+            thermalScope = false;
             // Kills while a camera has the view count too: the Juggernaut dying in his cinematic, a gunship's.
             drive.Scan(player, now, ksfeed::Attacking());
             // The MW2 player waits frozen where it stands; only MW2's HUD (the killstreak's overlay) and sounds run.
@@ -1093,6 +1160,11 @@ void ScriptMain() {
             vi.key = light.key, vi.ambient = light.ambient;
             if (cfg.viewmodelLight == 0) vi.key = 1.0f, vi.ambient = 0.35f; // fixed daylight
             vi.scene = cfg.viewmodelLight == 2;
+            // The heartbeat sensor's display, while the gun shown carries one.
+            heartbeat::Tick(player, vi.active && vmfeed::TrackerShown(),
+                            mw2drv.CurrentView().active ? mw2drv.CurrentView().heading
+                                                        : Call<Vector3>(gta::GET_GAMEPLAY_CAM_ROT, 2).z,
+                            vi.tracker);
             mw2drv.SetLens(vmfeed::Update(g_runtime, vi));
             // MW2's own crosshair (it opens with the spread) and sniper scope, with its images.
             vmfeed::HudInput hi;
@@ -1164,6 +1236,7 @@ void ScriptMain() {
             const vmfeed::HudResult hr = vmfeed::UpdateHud(g_runtime, hi);
             mw2Crosshair = hr.crosshair;
             mw2Bar = hr.weaponBar;
+            ThermalScope(hr.thermal);
             // F4b: the ped wears MW2's third-person animation of this step.
             // In first person the (hidden) body still runs MW2's animation when GTA's footsteps are wanted:
             // its feet make GTA's step sounds.
@@ -1172,6 +1245,7 @@ void ScriptMain() {
                            mw2drv.PedOffset(), Log);
         } else {
             mw2drv.Stop(player, "MW2Movement off");
+            ThermalScope(false);
             vmfeed::Update(g_runtime, vmfeed::Input{});
             vmfeed::UpdateHud(g_runtime, vmfeed::HudInput{});
             bodyfeed::Tick(g_runtime, player, false, 0.0f, Log);

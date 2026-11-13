@@ -32,6 +32,13 @@ void Logf(const char* fmt, A... a) {
     util::Logf(g_log, fmt, a...);
 }
 
+// How bright a sight's reticle shows (its texture's colour times this, added as light).
+constexpr float kReticleBrightness = 1.6f;
+// MW2's red for the reticles drawn from a grey mask (CV_VM_DRAW_TINT_RED: the red dot, the holographic's ring), in
+// linear light (the shader works linear and encodes at the end): about sRGB (255, 40, 25) at the dot's core.
+constexpr float kReticleRed[3] = {1.0f, 0.02f, 0.01f};
+// How much a reticle hides what is behind it at its brightest (0: purely added; 1: opaque).
+constexpr float kReticleCover = 0.7f;
 constexpr UINT kMaxBones = 256;
 
 constexpr char kShaders[] = R"(
@@ -40,7 +47,13 @@ cbuffer Frame : register(b0) {
     float4 light;   // xyz: direction to the light (view space), w: intensity
     float4 params;  // x: ambient, y: sRGB target, z: alpha test, w: has normal map
     float4 keep;    // GTA's HUD box the gun shows faintly through (pixels x0, y0, x1, y1; x1 <= x0: none)
-    float4 extra;   // x: an opaque surface (alpha 1), y: the box's soft edge (pixels), z: the gun's alpha inside it
+    float4 extra;   // x: an opaque surface (alpha 1), y: the box's soft edge (pixels), z: the gun's alpha inside it,
+                    // w: a reticle's brightness (drawn as light, added; 0: a lit surface)
+    float4 tint;    // rgb: a reticle's colour (its image times this); w: how much it hides what is behind
+    float4 trk;     // the heartbeat screen: x the sweep's radius, y the dots, z the screen's width / height,
+                    // w this surface is the screen (1) or not (0)
+    float4 trkUv;   // the screen's UV bounds (u0, v0, u1, v1)
+    float4 dots[16]; // s across, t down, brightness
 };
 cbuffer Bones : register(b1) { float4 rows[768]; };
 struct VSIn {
@@ -80,9 +93,50 @@ float KeepOut(float2 p) {
     float d = min(min(p.x - keep.x, keep.z - p.x), min(p.y - keep.y, keep.w - p.y));
     return lerp(1, extra.z, saturate(d / max(extra.y, 1)));
 }
+// MW2's heartbeat sensor's display on its screen: the ground ahead in range units (the player at the bottom
+// centre, the far edge 1 ahead), range rings, the sweep running up it and the hostiles' red dots.
+float3 Tracker(float2 uv, float3 glass) {
+    float2 q = saturate((uv - trkUv.xy) / max(trkUv.zw - trkUv.xy, 1e-4));
+    float2 p = float2((q.x - 0.5) * trk.z, 1 - q.y);
+    float r = length(p);
+    float3 c = glass * 0.3;
+    float rings = 0;
+    float wr = max(fwidth(r) * 1.5, 1e-4);
+    [unroll] for (int k = 1; k <= 3; ++k) rings = max(rings, 1 - saturate(abs(r - k / 3.0) / wr));
+    float centre = (1 - saturate(abs(p.x) / max(fwidth(p.x) * 1.5, 1e-4))) * step(r, 1);
+    c += float3(0.02, 0.16, 0.2) * max(rings, centre);
+    float behind = trk.x - r;
+    if (behind >= 0) c += float3(0.03, 0.3, 0.35) * exp(-behind * 10);
+    int n = (int)trk.y;
+    for (int j = 0; j < 16; ++j) {
+        if (j >= n) break;
+        float2 dp = float2((dots[j].x - 0.5) * trk.z, 1 - dots[j].y);
+        float d = length(p - dp);
+        float core = 1 - smoothstep(0.03, 0.045, d);
+        float glow = exp(-d * 25) * 0.4;
+        c += float3(1.0, 0.02, 0.01) * (core + glow) * dots[j].z * 1.5;
+    }
+    return c;
+}
 float4 PsMain(VSOut i, bool front : SV_IsFrontFace) : SV_Target {
     float4 albedo = colorMap.Sample(samp, i.uv);
+    if (trk.w > 0) {
+        // The heartbeat screen glows with its own display, unlit.
+        float3 t = Tracker(i.uv, albedo.rgb);
+        if (params.y == 0) t = Encode(t);
+        return float4(t, KeepOut(i.pos.xy));
+    }
     if (params.z > 0 && albedo.a < 0.5) discard;
+    if (extra.w > 0) {
+        // A sight's reticle: its own light over what is behind (MW2's red dot, ring and chevron), which it
+        // dims where it shines (tint.w at its brightest; premultiplied), so it stays visible against a bright
+        // sky. Its image's near-black (the grey masks' background, DXT noise) leaves the view untouched.
+        float3 r = saturate((albedo.rgb * albedo.a - 0.01) / 0.99);
+        float k = KeepOut(i.pos.xy);
+        float3 e = r * tint.rgb * extra.w * k;
+        if (params.y == 0) e = Encode(e);
+        return float4(e, saturate(max(r.r, max(r.g, r.b)) * extra.w) * tint.w * k);
+    }
     float3 n = normalize(front ? i.nrm : -i.nrm);
     if (params.w > 0) {
         float4 nm = normalMap.Sample(samp, i.uv);
@@ -108,8 +162,12 @@ struct Constants {
     float params[4];
     float keep[4];
     float extra[4];
+    float tint[4];
+    float trk[4];
+    float trkUv[4];
+    float dots[heartbeat::kMaxDots][4];
 };
-static_assert(sizeof(Constants) == 128);
+static_assert(sizeof(Constants) == 432 && heartbeat::kMaxDots == 16);
 // The gun under GTA's radar fades in over this many pixels from the box's edge (Frame::keepOutAlpha).
 constexpr float kKeepOutSoftPx = 24.0f;
 
@@ -130,6 +188,7 @@ struct Gpu {
     ID3D11Buffer* bones = nullptr;
     ID3D11BlendState* opaque = nullptr;
     ID3D11BlendState* blend = nullptr;
+    ID3D11BlendState* glow = nullptr; // the reticles (CV_VM_DRAW_EMISSIVE): light over what is behind
     ID3D11RasterizerState* raster = nullptr;
     ID3D11DepthStencilState* depthWrite = nullptr;
     ID3D11DepthStencilState* depthTest = nullptr;
@@ -291,6 +350,7 @@ void ReleaseAll() {
     SafeRelease(gpu.depthWrite);
     SafeRelease(gpu.raster);
     SafeRelease(gpu.blend);
+    SafeRelease(gpu.glow);
     SafeRelease(gpu.opaque);
     SafeRelease(gpu.bones);
     SafeRelease(gpu.cb);
@@ -356,6 +416,11 @@ bool CreateDeviceObjects(ID3D11Device* device) {
         rt.DestBlendAlpha = D3D11_BLEND_ONE;
         rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
         ok = ok && SUCCEEDED(device->CreateBlendState(&b, &gpu.blend));
+        // The reticles: their light added, and what is behind dimmed under it (premultiplied), so a red dot
+        // stays red against a bright sky instead of washing out to white.
+        rt.SrcBlend = D3D11_BLEND_ONE;
+        rt.DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+        ok = ok && SUCCEEDED(device->CreateBlendState(&b, &gpu.glow));
     }
     if (ok) {
         D3D11_RASTERIZER_DESC r{};
@@ -668,13 +733,17 @@ bool Present(IDXGISwapChain* sc, const Frame& frame) {
             if (ko[3] >= 1.0f) k.keep[3] = 1e6f;
         }
         k.extra[1] = kKeepOutSoftPx, k.extra[2] = std::clamp(frame.keepOutAlpha, 0.0f, 1.0f);
-        for (int pass = 0; pass < 2; ++pass) {
-            const bool blendPass = pass == 1;
-            k.extra[0] = blendPass ? 0.0f : 1.0f;
-            c->OMSetBlendState(blendPass || keepOut ? gpu.blend : gpu.opaque, factor, 0xFFFFFFFFu);
-            c->OMSetDepthStencilState(blendPass ? gpu.depthTest : gpu.depthWrite, 0);
+        // Opaque surfaces, then the blended ones without depth writes, then the sights' reticles as light.
+        for (int pass = 0; pass < 3; ++pass) {
+            const bool blendPass = pass == 1, lightPass = pass == 2;
+            k.extra[0] = pass == 0 ? 1.0f : 0.0f;
+            k.extra[3] = lightPass ? kReticleBrightness : 0.0f;
+            c->OMSetBlendState(lightPass ? gpu.glow : blendPass || keepOut ? gpu.blend : gpu.opaque, factor, 0xFFFFFFFFu);
+            c->OMSetDepthStencilState(pass == 0 ? gpu.depthWrite : gpu.depthTest, 0);
             for (const Draw& d : mesh.draws) {
-                if (((d.flags & CV_VM_DRAW_BLEND) != 0) != blendPass || d.count == 0) continue;
+                const bool light = (d.flags & CV_VM_DRAW_EMISSIVE) != 0;
+                if (light != lightPass || d.count == 0) continue;
+                if (!lightPass && ((d.flags & CV_VM_DRAW_BLEND) != 0) != blendPass) continue;
                 ID3D11ShaderResourceView* srv[2] = {gpu.white, nullptr};
                 if (d.color >= 0 && static_cast<std::size_t>(d.color) * 2 < gpu.meshSrv.size() && gpu.meshSrv[d.color * 2])
                     srv[0] = gpu.meshSrv[d.color * 2];
@@ -682,6 +751,21 @@ bool Present(IDXGISwapChain* sc, const Frame& frame) {
                     srv[1] = gpu.meshSrv[d.normal * 2 + 1];
                 k.params[2] = (d.flags & CV_VM_DRAW_ALPHA_TEST) ? 1.0f : 0.0f;
                 k.params[3] = srv[1] ? 1.0f : 0.0f;
+                const bool red = (d.flags & CV_VM_DRAW_TINT_RED) != 0;
+                for (int ch = 0; ch < 3; ++ch) k.tint[ch] = red ? kReticleRed[ch] : 1.0f;
+                k.tint[3] = kReticleCover;
+                // The heartbeat sensor's screen: its display (or its dark glass while the sensor is off).
+                const bool screen = (d.flags & CV_VM_DRAW_TRACKER) != 0;
+                k.trk[3] = screen ? 1.0f : 0.0f;
+                if (screen) {
+                    const heartbeat::Screen& t = frame.tracker;
+                    k.trk[0] = t.on ? t.sweep : 1e3f;
+                    k.trk[1] = t.on ? static_cast<float>(t.count) : 0.0f;
+                    k.trk[2] = heartbeat::kAspect;
+                    for (int q = 0; q < 4; ++q) k.trkUv[q] = d.uv[q];
+                    for (int j = 0; j < t.count && j < heartbeat::kMaxDots; ++j)
+                        for (int q = 0; q < 3; ++q) k.dots[j][q] = t.dots[j][q];
+                }
                 if (FAILED(c->Map(gpu.cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) continue;
                 std::memcpy(m.pData, &k, sizeof(k));
                 c->Unmap(gpu.cb, 0);

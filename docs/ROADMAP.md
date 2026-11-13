@@ -43,10 +43,20 @@ GTA is the world. Every MW2 asset is read from the player's own copy at setup ti
 | HUD | The minimap turns with where you look, like MW2's radar |
 | Setup | Python comes in the release (no download), which ends a Windows Defender false positive |
 
+## In 0.4.0
+
+| Area | What came |
+|---|---|
+| Weapons | MW2's attachments: sights with their reticles, the thermal scope, silencer, FMJ, extended mags, grip, rapid fire, tactical knife |
+| Weapons | The heartbeat sensor's screen shows the hostiles ahead |
+| Weapons | The underbarrel grenade launcher and shotgun, switched to and back with X (D-pad down) |
+| Weapons | Random guns come with random attachments |
+
 ## Next
 
 - Movement tuning: the remaining small hitches at car corners and low fences.
-- More of MW2's arsenal: the Riot Shield, and attachments (sights, suppressors, grips).
+- More of MW2's arsenal: the Riot Shield, akimbo.
+- Configurable killstreak kill counts.
 
 ## Later
 

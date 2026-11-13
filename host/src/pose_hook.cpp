@@ -155,6 +155,36 @@ void Apply(std::uintptr_t s) {
     }
 }
 
+// Headless peds: the head's bone and the bones under it, collapsed after GTA's tasks for their skeleton.
+constexpr int kHeadSlots = 16, kHeadBones = 96;
+struct Headless {
+    std::atomic<std::uintptr_t> skeleton{0}; // 0: free; set last when the rest is filled
+    std::uintptr_t locals = 0;               // the skeleton's local matrices: what GTA's tasks are given
+    int count = 0;                           // bones in the skeleton
+    int bones[kHeadBones] = {};              // [0] the head, then the bones under it
+    int n = 0;
+    std::atomic<unsigned> writes{0};
+};
+Headless g_heads[kHeadSlots];
+std::atomic<int> g_headsActive{0};
+
+// The head and everything under it to a point at the head (rotation rows to zero), in the object matrices;
+// the head's local loses its rotation too (a later compose keeps it gone).
+void CollapseHead(Headless& h) {
+    auto* objects = reinterpret_cast<float*>(h.locals + 64 * static_cast<std::uintptr_t>(h.count));
+    auto* locals = reinterpret_cast<float*>(h.locals);
+    const int head = h.bones[0];
+    const float tx = objects[16 * head + 12], ty = objects[16 * head + 13], tz = objects[16 * head + 14];
+    for (int k = 0; k < h.n; ++k) {
+        float* o = objects + 16 * h.bones[k];
+        for (int r = 0; r < 3; ++r) o[4 * r] = o[4 * r + 1] = o[4 * r + 2] = 0.0f;
+        o[12] = tx, o[13] = ty, o[14] = tz;
+    }
+    float* l = locals + 16 * head;
+    for (int r = 0; r < 3; ++r) l[4 * r] = l[4 * r + 1] = l[4 * r + 2] = 0.0f;
+    h.writes.fetch_add(1, std::memory_order_relaxed);
+}
+
 // Time spent in Apply (VerboseLog): [0] GTA's main thread, [1] its anim workers.
 std::atomic<long long> g_applyTicks[2]{};
 std::atomic<unsigned> g_applyCalls{0};
@@ -175,6 +205,11 @@ std::uintptr_t __fastcall JobWrap(std::uintptr_t params, std::uintptr_t b, std::
     if (s && params) {
         const std::uintptr_t locals = *reinterpret_cast<const std::uintptr_t*>(s + 0x10);
         if (locals && *reinterpret_cast<const std::uintptr_t*>(params + job.localsOffset) == locals) TimedApply(s, 1);
+    }
+    if (params && g_headsActive.load(std::memory_order_relaxed) > 0) {
+        const std::uintptr_t locals = *reinterpret_cast<const std::uintptr_t*>(params + job.localsOffset);
+        for (Headless& h : g_heads)
+            if (h.skeleton.load(std::memory_order_acquire) && h.locals == locals) CollapseHead(h);
     }
     return result;
 }
@@ -318,7 +353,7 @@ void Uninstall(void (*log)(const char*)) {
     g_skeleton = 0;
     g_fadeDir = 0;
     g_haveWritten = false;
-    UninstallJobs(log);
+    if (g_headsActive.load() == 0) UninstallJobs(log); // headless peds still need the tasks
     if (!g_entity) return;
     auto* const slot0 = reinterpret_cast<std::atomic<std::uintptr_t>*>(g_entity);
     if (slot0->load() == reinterpret_cast<std::uintptr_t>(g_copy + 1)) slot0->store(g_originalTable);
@@ -348,6 +383,62 @@ void PublishPose(const float* bones, int count) {
 }
 
 bool Installed() { return g_entity != 0; }
+
+bool JobsInstalled() { return g_jobs[0].target != 0; }
+
+bool HideHead(const probe::SkeletonInfo& skeleton, std::uint16_t headTag, int& bonesHidden, void (*log)(const char*)) {
+    bonesHidden = 0;
+    const std::uintptr_t s = skeleton.skeleton;
+    if (!s || !skeleton.objectMtx || skeleton.count <= 0 || skeleton.count > kMaxBones) return false;
+    std::uintptr_t data = 0, parentsPtr = 0;
+    if (!probe::ReadLive(s, &data, sizeof(data)) || !data || !probe::ReadLive(data + 0x38, &parentsPtr, sizeof(parentsPtr)) ||
+        !parentsPtr)
+        return false;
+    static std::int16_t parents[kMaxBones];
+    if (!probe::ReadLive(parentsPtr, parents, sizeof(std::int16_t) * skeleton.count)) return false;
+    const int head = probe::BoneIndexByTag(skeleton, headTag);
+    if (head < 0) return false;
+    Headless* slot = nullptr;
+    for (Headless& h : g_heads) {
+        const std::uintptr_t cur = h.skeleton.load();
+        if (cur == s) return true; // already headless
+        if (!cur && !slot) slot = &h;
+    }
+    if (!slot) return false;
+    // The head, then every bone whose chain of parents reaches it.
+    slot->n = 0;
+    slot->bones[slot->n++] = head;
+    for (int i = 0; i < skeleton.count && slot->n < kHeadBones; ++i) {
+        int p = parents[i];
+        for (int guard = 0; p >= 0 && p < skeleton.count && guard < kMaxBones; ++guard, p = parents[p])
+            if (p == head) {
+                slot->bones[slot->n++] = i;
+                break;
+            }
+    }
+    slot->locals = skeleton.objectMtx; // SkeletonInfo's objectMtx is the +0x10 local array
+    slot->count = skeleton.count;
+    slot->writes = 0;
+    if (!InstallJobs(log)) return false;
+    slot->skeleton.store(s, std::memory_order_release);
+    g_headsActive.fetch_add(1);
+    bonesHidden = slot->n;
+    return true;
+}
+
+void ShowHead(std::uintptr_t skeleton, void (*log)(const char*)) {
+    for (Headless& h : g_heads)
+        if (skeleton && h.skeleton.load() == skeleton) {
+            h.skeleton.store(0, std::memory_order_release);
+            if (g_headsActive.fetch_sub(1) == 1 && !g_entity) UninstallJobs(log); // the last one, and no MW2 pose
+        }
+}
+
+unsigned HeadWrites(std::uintptr_t skeleton) {
+    for (const Headless& h : g_heads)
+        if (skeleton && h.skeleton.load() == skeleton) return h.writes.load();
+    return 0;
+}
 
 void FadeOut(int ms) {
     g_outDone = false;

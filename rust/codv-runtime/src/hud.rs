@@ -26,6 +26,8 @@ pub struct Facts {
     pub overlay: h::WeaponAdsOverlayFacts,
     pub spread: w::WeaponSpreadFacts,
     pub cooks: bool,
+    /// A thermal scope (MW2's thermalScope): the view goes thermal while scoped.
+    pub thermal: bool,
 }
 
 impl Facts {
@@ -66,6 +68,7 @@ impl Facts {
                 prone_max: r.f("hip_spread_prone_max"),
             },
             cooks: r.i("weap_type") == 1 && r.i("offhand_class") == 1,
+            thermal: r.i("thermal_scope") != 0,
             overlay_image,
         }
     }
@@ -86,6 +89,8 @@ pub struct Frame {
     pub overlay_four_quads: bool,
     /// The view model is hidden behind the overlay.
     pub scoped: bool,
+    /// Scoped through a thermal scope: the view is thermal.
+    pub thermal: bool,
     pub center_image: String,
     pub side_image: String,
     pub overlay_image: String,
@@ -133,6 +138,7 @@ impl Hud {
             out.overlay_size = [f.overlay.ads_overlay_width, f.overlay.ads_overlay_height];
             out.overlay_four_quads = h::ads_overlay_uses_four_quads(out.overlay_size[0], out.overlay_size[1]);
             out.scoped = iris.active;
+            out.thermal = out.scoped && f.thermal;
         }
 
         // The hip crosshair.
@@ -261,5 +267,19 @@ mod tests {
         assert_eq!(ads.overlay_size, [480.0, 480.0]);
         assert!(!ads.overlay_four_quads);
         assert_eq!(ads.overlay_image, "scope_overlay_m40a3_1024#0");
+        assert!(!ads.thermal);
+    }
+
+    #[test]
+    fn a_thermal_scope_goes_thermal_only_while_scoped() {
+        let mut hud = Hud::default();
+        let mut r = row("m4_thermal_mp", true);
+        r.numbers.push(("thermal_scope".into(), 1.0));
+        assert!(!hud.frame(&player(0.0, 0.0), Some(&r), 65.0, false).thermal);
+        hud.frame(&player(0.5, 0.0), Some(&r), 65.0, false);
+        let ads = hud.frame(&player(1.0, 0.0), Some(&r), 10.0, false);
+        assert!(ads.scoped && ads.thermal, "{ads:?}");
+        hud.frame(&player(0.5, 0.0), Some(&r), 65.0, false);
+        assert!(!hud.frame(&player(0.0, 0.0), Some(&r), 65.0, false).thermal);
     }
 }

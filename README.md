@@ -92,6 +92,9 @@ Javelin, Thumper). Every gun keeps its own rounds; MW2's Scavenger gives a magaz
 every hostile kill. The Stinger locks on to aircraft (up to 2500 m) and the Javelin to ground vehicles (it climbs
 over its target and dives on top); a locked missile flies about 3 km and goes off near its target, so aircraft
 crossing the sky come down (`Mw2Missiles`). The RPG-7, the AT4 and the Thumper fire straight.
+MW2's attachments go on the guns (menu Weapons; random guns come with random ones): sights, silencer, FMJ,
+extended mags, the heartbeat sensor (its screen shows the hostiles ahead) and the underbarrel grenade launcher or
+shotgun, which X (D-pad down) switches to and back, with MW2's animations and their own rounds.
 
 **Explosives.** G (RB) throws what you pick in the menu (`Lethal`), with MW2's own animation and HUD icon:
 the frag; the Semtex, which sticks to whatever it hits, a car or a person included, and goes off two seconds
@@ -150,7 +153,7 @@ switch and six sections (right / A / Enter opens one, B / Backspace goes back):
 
 | Section | Settings |
 |---|---|
-| Weapons | weapon sets, random guns, primary / secondary, Stinger / Javelin missiles, spare ammo, grenades carried, lethal (frag / Semtex / C4 / Claymore / throwing knife), tactical (flashbang / stun / smoke), Scavenger, number keys, recoil, damage, tracers, shots (below), weapon volume |
+| Weapons | weapon sets, random guns, primary / secondary, Stinger / Javelin missiles, spare ammo, grenades carried, lethal (frag / Semtex / C4 / Claymore / throwing knife), tactical (flashbang / stun / smoke), Scavenger, number keys, recoil, damage, tracers, MW2 attachments, shots (below), weapon volume |
 | Movement | reload while sprinting, MW2 movement, mouse sensitivity, invert look, field of view, third person, sprint speed and time, jump height, MW2's jump slowdown, fall damage, smooth collision, quick jump, forced first person |
 | Parkour | slide (speed, length), dive, auto vault (from what height), mantle speed, high climb (up to what height), movement sounds |
 | HUD | MW2's HUD, stamina bar, crosshair, hitmarker, hit sounds, gun lighting, gun over radar, minimap follows view, body animation, debug overlay |

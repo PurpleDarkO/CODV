@@ -34,6 +34,17 @@ void FadeOut(int ms);
 void FadeIn(int ms);
 bool FadeOutDone();
 
+// Headless peds (the zombie modes' head shots): after GTA's anim job tasks for a registered ped's skeleton, its
+// head and every bone under it are collapsed to a point at the head (scale 0), so the head is gone from the mesh.
+// The tasks are detoured for this alone when MW2's pose is not on. The ped must stay alive in memory (a mission
+// entity) until ShowHead. Script thread. HideHead: false when the skeleton has no head or no slot is free.
+bool HideHead(const probe::SkeletonInfo& skeleton, std::uint16_t headTag, int& bonesHidden, void (*log)(const char*));
+void ShowHead(std::uintptr_t skeleton, void (*log)(const char*));
+// How many times the head was collapsed after GTA's tasks (0: GTA's tasks never ran for it since).
+unsigned HeadWrites(std::uintptr_t skeleton);
+// Whether the anim job tasks are detoured (needed for either use).
+bool JobsInstalled();
+
 // Time the pose writes took since the last call (main thread, anim workers).
 struct ApplyTime {
     double mainMs, workerMs;

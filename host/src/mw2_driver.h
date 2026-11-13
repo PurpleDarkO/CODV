@@ -162,6 +162,7 @@ private:
     bool thirdPerson_ = false, thirdPersonSet_ = false;
     bool inputFrozen_ = false;
     std::uint16_t padButtons_ = 0;
+    bool altPadHeld_ = false; // D-pad down held last frame (the underbarrel switch fires on the press)
     bool hidden_ = false;
     Entity hiddenGun_ = 0;
     // The debug panel.

@@ -166,6 +166,12 @@ pub const CV_OPT_LETHAL: u32 = 47;
 /// off at their fuse unharmed (CV_GRENADE_KIND_FLASH .. SMOKE): the host makes their effect. An addition to
 /// ABI 10.
 pub const CV_OPT_TACTICAL: u32 = 48;
+/// MW2's attachments on the primary and the secondary, two each (0 none, 1.. arms::ATTACHMENTS): the
+/// gun becomes its MW2 variant with them (or the closest one the player's MW2 has).
+pub const CV_OPT_MW2_ATTACH_PRIMARY_1: u32 = 49;
+pub const CV_OPT_MW2_ATTACH_PRIMARY_2: u32 = 50;
+pub const CV_OPT_MW2_ATTACH_SECONDARY_1: u32 = 51;
+pub const CV_OPT_MW2_ATTACH_SECONDARY_2: u32 = 52;
 /// CODV's sprint refill (30% faster than MW2's: the meter was rarely full again).
 const SPRINT_RECHARGE: f32 = 1.3;
 /// CODV's default sprint speed scale: a little over MW2's 1.5.
@@ -1034,6 +1040,22 @@ pub unsafe extern "C" fn cv_set_option(rt: *mut c_void, id: u32, value: f32) -> 
                     }
                 }
             }
+            CV_OPT_MW2_ATTACH_PRIMARY_1
+            | CV_OPT_MW2_ATTACH_PRIMARY_2
+            | CV_OPT_MW2_ATTACH_SECONDARY_1
+            | CV_OPT_MW2_ATTACH_SECONDARY_2 => {
+                if !value.is_finite() || value < 0.0 {
+                    return 0;
+                }
+                let Some(arms) = inner.arms.as_mut() else { return 0 };
+                let k = (id - CV_OPT_MW2_ATTACH_PRIMARY_1) as usize;
+                let Some(name) = arms.set_attachment(k / 2, k % 2, value as usize) else { return 0 };
+                (rt.log)(&format!("mw2: {} attachments: {name}", if k < 2 { "primary" } else { "secondary" }));
+                if let Some(vm) = inner.vm.as_mut() {
+                    vm.reset();
+                }
+                prewarm(&inner, &rt.audio);
+            }
             _ => return 0,
         }
         1
@@ -1197,6 +1219,9 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
             }
             arms.reload_sprint = inner.reload_sprint;
             arms.before_step(&mut st.player, input.weapon_request);
+            if input.weapon_request == CV_WEAPON_REQUEST_ALTERNATE {
+                (rt.log)(&arms.alternate_note());
+            }
         }
         // The knife or the frag on the trigger (number keys): pmove and the weapon see MW2's buttons.
         let mapped = CvMoveInput {
@@ -1307,7 +1332,15 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
                 // An offhand throw shows the grenade's viewmodel (pin, cook, throw).
                 let shown = frame.offhand_view.unwrap_or(frame.weapon);
                 let name = arms.arsenal.any(shown).map_or("", |g| g.name.as_str());
-                vm.tick(shown, name, &st.player, frame, input.msec as f32 / 1000.0, &**rt.log);
+                // An underbarrel weapon in hand: its gun's parts on the view model (a key of its own per gun).
+                let parent = (frame.offhand_view.is_none() && arms.arsenal.is_underbarrel(shown))
+                    .then(|| arms.gunner.as_ref().and_then(|g| g.underbarrel_parent()))
+                    .flatten();
+                let (key, dressed) = match parent {
+                    Some(p) => (VM_UNDERBARREL_KEY | p, arms.arsenal.gun(p).map_or("", |g| g.name.as_str())),
+                    None => (shown, ""),
+                };
+                vm.tick(key, name, dressed, &st.player, frame, input.msec as f32 / 1000.0, &**rt.log);
                 notes = vm.take_notes();
             }
             if let Some(h) = inner.mw2hud.as_mut() {
@@ -1461,6 +1494,35 @@ pub struct CvVmVertex {
 
 pub const CV_VM_DRAW_ALPHA_TEST: u32 = 1;
 pub const CV_VM_DRAW_BLEND: u32 = 2;
+/// A sight's reticle (the red dot's dot, the holographic's ring, the ACOG's chevron): drawn as light, unlit and
+/// added to what is behind, as MW2 draws them.
+pub const CV_VM_DRAW_EMISSIVE: u32 = 8;
+/// A reticle whose image is a grey mask (the red dot's and the holographic's): MW2 tints it red as it draws it.
+pub const CV_VM_DRAW_TINT_RED: u32 = 16;
+/// The heartbeat sensor's screen (mtl_motion_tracker_screen): the host draws the sensor's display on it.
+pub const CV_VM_DRAW_TRACKER: u32 = 32;
+
+/// Whether a view model material is a sight's reticle (MW2's names: the red dot sight's dot,
+/// mtl_weapon_red_cross_small; the holographic's ring, mtl_weapon_red_dot3; the built-in red dots,
+/// mtl_weapon_red_dot2; the ACOG's chevron, ..._acog_2_reticle). Not the sights' bodies
+/// (mtl_weapon_red_dot_sight), their glass (..._lens) nor the ACOG's dark ring (..._reticle_base, drawn as it is).
+fn reticle_material(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    (n.contains("reticle") && !n.contains("reticle_base")) || red_reticle(&n)
+}
+
+/// Whether a reticle's image is a grey mask MW2 tints red (the red dots and the holographic's ring; the ACOG's
+/// chevron has its own colour).
+fn red_reticle(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    (n.contains("red_dot") && !n.contains("sight")) || n.contains("red_cross")
+}
+
+/// Whether a view model material is the heartbeat sensor's screen (MW2 draws its display there).
+fn tracker_screen(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("motion_tracker_screen")
+}
+
 pub const CV_VM_DRAW_TWO_SIDED: u32 = 4;
 
 /// One surface: an index range and its material's images (file stems under
@@ -1639,7 +1701,10 @@ pub unsafe extern "C" fn cv_vm_mesh_data(
                 index_count: s.index_count,
                 flags: (if m.alpha_test() != 0 { CV_VM_DRAW_ALPHA_TEST } else { 0 })
                     | (if m.blended() { CV_VM_DRAW_BLEND } else { 0 })
-                    | (if m.cull() != 2 { CV_VM_DRAW_TWO_SIDED } else { 0 }),
+                    | (if m.cull() != 2 { CV_VM_DRAW_TWO_SIDED } else { 0 })
+                    | (if reticle_material(&m.name) { CV_VM_DRAW_EMISSIVE } else { 0 })
+                    | (if red_reticle(&m.name) { CV_VM_DRAW_TINT_RED } else { 0 })
+                    | (if tracker_screen(&m.name) { CV_VM_DRAW_TRACKER } else { 0 }),
                 ..Default::default()
             };
             copy_str(&mut d.color_map, &codv_mw2data::vm::file_stem(&m.color_map.to_ascii_lowercase()));
@@ -1963,6 +2028,10 @@ pub unsafe extern "C" fn cv_audio_get_status(rt: *const c_void, out: *mut CvAudi
 
 pub const CV_WEAPON_REQUEST_KNIFE: u32 = arms::REQUEST_KNIFE;
 pub const CV_WEAPON_REQUEST_GRENADE: u32 = arms::REQUEST_GRENADE;
+/// MW2's switch to the held gun's underbarrel weapon (the grenade launcher, the shotgun) and back.
+pub const CV_WEAPON_REQUEST_ALTERNATE: u32 = arms::REQUEST_ALTERNATE;
+/// The view model key of an underbarrel weapon shown on gun `id`: this bit with the gun's id.
+const VM_UNDERBARREL_KEY: u32 = 0x8000_0000;
 pub const CV_GRENADE_FLYING: u32 = 1;
 pub const CV_GRENADE_EXPLODED: u32 = 2;
 /// A C4 or a Claymore came to rest (once): the host takes it over (it never goes off in the runtime).
@@ -2102,6 +2171,8 @@ pub unsafe extern "C" fn cv_mw2_grenades(rt: *mut c_void, out: *mut CvGrenade, c
 pub const CV_HUD_CROSSHAIR: u32 = 1;
 pub const CV_HUD_OVERLAY: u32 = 2;
 pub const CV_HUD_OVERLAY_FOUR_QUADS: u32 = 4;
+/// Scoped through a thermal scope (the thermal attachment): the host turns GTA's thermal view on.
+pub const CV_HUD_THERMAL: u32 = 8;
 
 /// MW2's hip crosshair and scope overlay for this frame. Sizes in MW2's
 /// virtual screen units (480 = the screen's height), from the centre.
@@ -2168,6 +2239,9 @@ pub unsafe extern "C" fn cv_mw2_hud(rt: *mut c_void, fov_y: f32, third_person: u
             h.flags |= CV_HUD_OVERLAY | if f.overlay_four_quads { CV_HUD_OVERLAY_FOUR_QUADS } else { 0 };
             h.overlay_alpha = f.overlay_alpha;
             h.overlay_size = f.overlay_size;
+        }
+        if f.thermal {
+            h.flags |= CV_HUD_THERMAL;
         }
         let stem = |s: &str| codv_mw2data::vm::file_stem(&s.to_ascii_lowercase());
         copy_str(&mut h.center_image, &stem(&f.center_image));
@@ -3109,6 +3183,26 @@ pub unsafe extern "C" fn cv_mw2_hud_damage(rt: *mut c_void, from: *const f32, fl
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sight_reticles_are_light() {
+        assert!(super::tracker_screen("mc/mtl_motion_tracker_screen"));
+        assert!(!super::tracker_screen("mc/mtl_weapon_motion_tracker"));
+        assert!(super::reticle_material("mc/mtl_weapon_red_dot3"));
+        assert!(super::reticle_material("mc/mtl_weapon_acog_2_reticle"));
+        assert!(super::reticle_material("mc/mtl_weapon_red_cross_small"));
+        assert!(super::reticle_material("mc/mtl_weapon_red_dot2"));
+        assert!(!super::reticle_material("mc/mtl_weapon_reflex_lens"));
+        assert!(!super::reticle_material("mc/mtl_weapon_eotech_2_lense"));
+        assert!(super::red_reticle("mc/mtl_weapon_red_cross_small"));
+        assert!(super::red_reticle("mc/mtl_weapon_red_dot3"));
+        assert!(!super::red_reticle("mc/mtl_weapon_acog_2_reticle"));
+        assert!(!super::red_reticle("mc/mtl_weapon_red_dot_sight"));
+        assert!(!super::reticle_material("mc/mtl_weapon_acog_2_lens"));
+        assert!(!super::reticle_material("mc/mtl_weapon_red_dot_sight"));
+        assert!(!super::reticle_material("mc/mtl_weapon_acog_2_reticle_base"));
+        assert!(!super::reticle_material("mc/mtl_weapon_m4"));
+    }
+
     use super::*;
     use codv_core::player::{FIRE, RELOAD};
     use std::mem::offset_of;

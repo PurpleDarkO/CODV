@@ -6,6 +6,42 @@ noted with each release: a host and a runtime only work together on the same ABI
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
+Runtime ABI 10, unchanged (the runtime's additions are optional options, flags and requests). **Run the setup
+again** to install it: it now imports MW2's underbarrel weapons too (your `CodVLegacy.ini` settings are kept).
+
+### Added
+- MW2's attachments (menu Weapons, `Mw2PrimaryAttach` / `Mw2PrimaryAttach2` / `Mw2SecondaryAttach` /
+  `Mw2SecondaryAttach2`): two per gun, as MW2 offers them (red dot, holographic, ACOG, thermal, silencer, FMJ,
+  extended mags, heartbeat sensor, grenade launcher, shotgun, rapid fire, grip, akimbo, tactical knife). The gun
+  becomes MW2's own variant with them, imported from your copy: the parts on the gun, its numbers (the silencer's
+  shorter range, the extended mags) and its sounds. A gun without an attachment (or that pair) keeps the closest
+  variant it has. Akimbo shows one gun for now.
+- The sights' reticles: the red dot's dot, the holographic's ring and the ACOG's chevron are drawn as light on the
+  gun as MW2 draws them (unlit, MW2's red for the red dot and the holographic, still visible against a bright
+  sky); the built-in red dots (the TAR-21's) too.
+- The thermal scope goes thermal: scoped through it, GTA's thermal view is on (off again as the scope goes; a
+  killstreak's camera keeps its own).
+- The heartbeat sensor works: its screen on the gun shows the ground ahead as MW2's does (you at the bottom, 40 m
+  ahead at the top, range rings), and every 3 s a sweep runs up it and shows the hostiles there as red dots
+  (police after you, anyone fighting you), fading until the next sweep.
+- The underbarrel grenade launcher and shotgun: X (D-pad down) switches to them and back as MW2 does (its switch
+  animations and times), each with its own rounds (the launcher's grenades go off as GTA's grenade launcher's,
+  the shotgun fires MW2's pellets).
+- Random guns (`RandomLoadout`, weapon sets) come with random attachments: each gun is one of MW2's variants of
+  it, bare now and then, mostly with one or two attachments (not akimbo yet).
+
+### Changed
+- The menu's guns and attachments hold whenever random guns (`RandomLoadout`) is off, weapon sets included: they
+  lead keys 1 and 2 (the other guns of each key are rolled, with random attachments). Turning random guns off in
+  the menu puts them on at once.
+
+### Fixed
+- Attachment variants that sound as their base gun (a red dot or ACOG M4, for one) were silent: MW2's zones leave
+  their sounds to the base gun's, which the import does not follow. The runtime now takes them from the base gun
+  (from `<gun>_silencer_mp` for a silenced variant).
+
 ## [0.3.1] - 2026-11-10
 
 Runtime ABI 10, unchanged. Run the setup again to install it (your `CodVLegacy.ini` settings are kept).
@@ -193,7 +229,8 @@ First public release. Runtime ABI 10.
 - CODV's own missiles have no in-flight sound yet.
 - GTA V Enhanced and GTA Online are not supported.
 
-[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/PurpleDarkO/CODV/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/PurpleDarkO/CODV/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PurpleDarkO/CODV/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/PurpleDarkO/CODV/compare/v0.1.0...v0.2.0

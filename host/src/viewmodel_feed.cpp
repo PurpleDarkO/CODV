@@ -8,6 +8,7 @@
 
 #include <main.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -54,6 +55,7 @@ bool Covered(IDXGISwapChain* sc, ULONGLONG now, ULONGLONG published) {
 }
 
 std::map<std::uint32_t, std::shared_ptr<const vmrender::Mesh>> g_meshes;
+bool g_tracker = false; // script thread: the gun shown last has a heartbeat screen
 // The script thread and the prewarm thread share the decoded images (null: missing or unreadable).
 SRWLOCK g_imageLock = SRWLOCK_INIT;
 std::map<std::string, std::shared_ptr<const dds::Texture>> g_images;
@@ -207,6 +209,22 @@ std::shared_ptr<const vmrender::Mesh> Mesh(RuntimeBridge& runtime, std::uint32_t
         out.flags = d.flags;
         out.color = index(Field(d.color_map, sizeof(d.color_map)));
         out.normal = index(Field(d.normal_map, sizeof(d.normal_map)));
+        if (d.flags & CV_VM_DRAW_TRACKER) {
+            // The screen's UV bounds: the display spans them (MW2's screen: u left to right, v top to bottom).
+            float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+            for (UINT k = 0; k < out.count && out.first + k < m->indices.size(); ++k) {
+                const std::uint32_t vi = m->indices[out.first + k];
+                if (vi >= m->vertices.size()) continue;
+                for (int c = 0; c < 2; ++c) {
+                    lo[c] = std::min(lo[c], m->vertices[vi].uv[c]);
+                    hi[c] = std::max(hi[c], m->vertices[vi].uv[c]);
+                }
+            }
+            if (hi[0] > lo[0] && hi[1] > lo[1]) {
+                out.uv[0] = lo[0], out.uv[1] = lo[1], out.uv[2] = hi[0], out.uv[3] = hi[1];
+                m->tracker = true;
+            }
+        }
         m->draws.push_back(out);
     }
     util::Logf(g_log, "CODV viewmodel: mesh %u (%zu vertices, %zu draws, %zu images)", id, m->vertices.size(),
@@ -272,7 +290,12 @@ void Stop() {
     g_warm.clear();
 }
 
+bool TrackerShown() {
+    return g_tracker;
+}
+
 float Update(RuntimeBridge& runtime, const Input& in) {
+    g_tracker = false;
     CvVmFrame f{};
     if (!in.active || !runtime.VmFrame(f, g_bones)) {
         Hide();
@@ -304,7 +327,9 @@ float Update(RuntimeBridge& runtime, const Input& in) {
         g_frame.scene = in.scene;
         for (int k = 0; k < 4; ++k) g_frame.keepOut[k] = in.keepOut[k];
         g_frame.keepOutAlpha = in.keepOutAlpha;
+        g_frame.tracker = in.tracker;
     }
+    g_tracker = mesh->tracker;
     char line[96];
     std::snprintf(line, sizeof(line), "viewmodel: mesh %u, %u bones, ads %.2f", f.mesh_id, f.bone_count, f.ads);
     g_status = line;
@@ -322,6 +347,7 @@ HudResult UpdateHud(RuntimeBridge& runtime, const HudInput& in) {
     if (runtime.Mw2Hud(in.fovY, in.thirdPerson, h)) {
         if (!in.crosshair) h.flags &= ~CV_HUD_CROSSHAIR;
         if (in.vehicle) h.flags = 0; // no crosshair or scope from a vehicle's seat
+        result.thermal = (h.flags & CV_HUD_THERMAL) != 0;
         f.hud = h;
         f.images[hudrender::kCenter] = Image(Field(h.center_image, sizeof(h.center_image)));
         f.images[hudrender::kSide] = Image(Field(h.side_image, sizeof(h.side_image)));

@@ -110,6 +110,14 @@ enum CvOption : std::uint32_t {
     CV_OPT_RELOAD_SPRINT = 46,    // reload while sprinting, a little slower (1, the default); 0: the sprint waits for the reload
     CV_OPT_TACTICAL = 48,         // the smoke button's special grenade: 0 none, 1 flash, 2 stun, 3 smoke (ABI 10)
     CV_OPT_LETHAL = 47,           // the frag button's: 0 frag, 1 Semtex, 2 C4, 3 Claymore, 4 throwing knife (ABI 10)
+    // MW2's attachments, two on the primary and two on the secondary: 0 none, 1 red dot, 2 holographic, 3 ACOG,
+    // 4 thermal, 5 silencer, 6 FMJ, 7 extended mags, 8 heartbeat sensor, 9 grenade launcher, 10 shotgun,
+    // 11 rapid fire, 12 grip, 13 akimbo, 14 tactical knife. The gun becomes its MW2 variant with them (the
+    // closest the player's MW2 has); a runtime without them returns 0 (ABI 10, optional).
+    CV_OPT_MW2_ATTACH_PRIMARY_1 = 49,
+    CV_OPT_MW2_ATTACH_PRIMARY_2 = 50,
+    CV_OPT_MW2_ATTACH_SECONDARY_1 = 51,
+    CV_OPT_MW2_ATTACH_SECONDARY_2 = 52,
 };
 
 // Killstreak rewards (MW2's killstreakTable references); stage 1 implements UAV and EMP.
@@ -325,7 +333,17 @@ struct CvVmVertex {
     std::uint8_t bones[4];
     float weights[4];
 };
-enum CvVmDrawFlags : std::uint32_t { CV_VM_DRAW_ALPHA_TEST = 1u << 0, CV_VM_DRAW_BLEND = 1u << 1, CV_VM_DRAW_TWO_SIDED = 1u << 2 };
+// CV_VM_DRAW_EMISSIVE: a sight's reticle, drawn as light (unlit, added); CV_VM_DRAW_TINT_RED: its image is a
+// grey mask, tinted red (the red dot's and the holographic's); CV_VM_DRAW_TRACKER: the heartbeat sensor's screen
+// (the host draws the sensor's display on it). An older runtime never sets them.
+enum CvVmDrawFlags : std::uint32_t {
+    CV_VM_DRAW_ALPHA_TEST = 1u << 0,
+    CV_VM_DRAW_BLEND = 1u << 1,
+    CV_VM_DRAW_TWO_SIDED = 1u << 2,
+    CV_VM_DRAW_EMISSIVE = 1u << 3,
+    CV_VM_DRAW_TINT_RED = 1u << 4,
+    CV_VM_DRAW_TRACKER = 1u << 5
+};
 // An index range and its images (file stems under <data>\mw2\viewmodels\images\, .dds; empty: none).
 struct CvVmDraw {
     std::uint32_t first_index, index_count;
@@ -419,6 +437,7 @@ static_assert(sizeof(CvAudioStatus) == 120, "CvAudioStatus");
 // release to throw; then the gun again). Any other request puts the gun back on the trigger.
 #define CV_WEAPON_REQUEST_KNIFE 0x100u
 #define CV_WEAPON_REQUEST_GRENADE 0x101u
+#define CV_WEAPON_REQUEST_ALTERNATE 0x102u // the held gun's underbarrel weapon and back (an older runtime: nothing)
 
 // ---- thrown grenades (ABI 7) ----
 #define CV_GRENADE_FLYING 1u
@@ -452,6 +471,7 @@ static_assert(sizeof(CvGrenade) == 48 && offsetof(CvGrenade, position) == 16 && 
 #define CV_HUD_CROSSHAIR 1u           // the hip reticle: four side images at +-gap, the centre image
 #define CV_HUD_OVERLAY 2u             // the ADS overlay (sniper scope), black around it
 #define CV_HUD_OVERLAY_FOUR_QUADS 4u  // overlay_size is one quarter, mirrored around the centre
+#define CV_HUD_THERMAL 8u             // scoped through a thermal scope: GTA's thermal view on (an older runtime: never)
 struct CvMw2Hud {
     std::uint32_t size;
     std::uint32_t flags;

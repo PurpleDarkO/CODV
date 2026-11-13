@@ -4,6 +4,7 @@
 // frame and the mesh (with its DDS images from <data>\mw2\viewmodels\images\)
 // once per mesh id; ScriptHookV's present callback draws the latest frame on
 // the render thread (viewmodel_render).
+#include "heartbeat_rules.h"
 #include "runtime_bridge.h"
 
 #include <array>
@@ -29,7 +30,10 @@ struct Input {
     bool scene = true;          // the scene behind the gun lights it too (ViewmodelLight=2)
     float keepOut[4] = {};      // GTA's radar: a box of the screen the gun stays out of (vmrender::Frame)
     float keepOutAlpha = 0.18f; // how much of the gun shows there
+    heartbeat::Screen tracker;  // the heartbeat sensor's display
 };
+// Whether the gun shown last has a heartbeat sensor's screen (its display is wanted).
+bool TrackerShown();
 // Script thread, after cv_mw2_step. Returns MW2's lens FOV for this frame as
 // GTA's vertical degrees (the camera takes the same lens), or 0 when no view
 // model is shown.
@@ -57,6 +61,7 @@ struct HudInput {
 struct HudResult {
     bool crosshair = false; // MW2 draws the crosshair: the host's rect crosshair stays off
     bool weaponBar = false; // MW2 draws the ammo, hit marker and warnings: the host's stay off
+    bool thermal = false;   // scoped through a thermal scope: the view goes thermal
 };
 // Script thread, after cv_mw2_step: MW2's crosshair and scope (cv_mw2_hud) and
 // its HUD (cv_mw2_hud_draw) for the present callback (hud_render).

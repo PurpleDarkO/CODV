@@ -57,6 +57,7 @@ CV_NATIVE(GET_ENTITY_HEIGHT_ABOVE_GROUND, 0x1DD55701034110E5)    // float (Entit
 CV_NATIVE(IS_ENTITY_A_PED, 0x524AC5ECEA15343E)                   // BOOL (Entity)
 CV_NATIVE(IS_ENTITY_A_VEHICLE, 0x6AC7003FA6E5575E)               // BOOL (Entity)
 CV_NATIVE(GET_PED_SOURCE_OF_DEATH, 0x93C8B64DEB84728C)           // Entity (Ped): who killed it (0: no one)
+CV_NATIVE(GET_PED_CAUSE_OF_DEATH, 0x16FFE42AB2D2DC59)            // Hash (Ped): the weapon that killed it
 CV_NATIVE(GET_PED_LAST_DAMAGE_BONE, 0xD75960F6BD9EA49C)          // BOOL (Ped, int* bone)
 CV_NATIVE(GET_PED_IN_VEHICLE_SEAT, 0xBB40DD2270B65366)           // Ped (Vehicle, int seat, BOOL)
 CV_NATIVE(IS_ENTITY_IN_WATER, 0xCFB0A0D8EDD145A3)                // BOOL (Entity)
@@ -193,6 +194,7 @@ CV_NATIVE(IS_PED_A_PLAYER, 0x12534C348C6CB68B)                   // BOOL (Ped)
 CV_NATIVE(ADD_BLIP_FOR_ENTITY, 0x5CDE92C702A8FCE7)               // Blip (Entity)
 CV_NATIVE(SET_BLIP_SPRITE, 0xDF735600A4696DAF)                   // void (Blip, int)
 CV_NATIVE(SET_BLIP_COLOUR, 0x03D7FB09E75D6B7E)                   // void (Blip, int)
+CV_NATIVE(SET_BLIP_FLASHES, 0xB14552383D39CE3E)                  // void (Blip, BOOL)
 CV_NATIVE(SET_BLIP_SCALE, 0xD38744167B2FA257)                    // void (Blip, float)
 CV_NATIVE(SET_BLIP_AS_SHORT_RANGE, 0xBE8BE4FE60E27B72)           // void (Blip, BOOL)
 CV_NATIVE(DOES_BLIP_EXIST, 0xA6DB27D19ECBB7DA)                   // BOOL (Blip)
@@ -320,6 +322,7 @@ CV_NATIVE(SET_AMBIENT_VOICE_NAME, 0x6C8065A3B780185B) // void (Ped, const char* 
 CV_NATIVE(TASK_FOLLOW_NAV_MESH_TO_COORD, 0x15D3A79D4E44B913) // void (Ped, x, y, z, float moveBlend, int ms, float radius, int flags, float heading)
 CV_NATIVE(TASK_GO_STRAIGHT_TO_COORD, 0xD76B57B44F1E6F8B) // void (Ped, x, y, z, float moveBlend, int ms, float heading, float slide)
 CV_NATIVE(TASK_SMART_FLEE_COORD, 0x94587F17E9C365D5) // void (Ped, x, y, z, float distance, int ms, BOOL pavements, BOOL quitOutOfRange)
+CV_NATIVE(TASK_WANDER_IN_AREA, 0xE054346CA3A0F315)   // void (Ped, x, y, z, float radius, float minLength, float timeBetweenWalks)
 CV_NATIVE(SET_ENTITY_PROOFS, 0xFAEE099C6F890BB8)    // void (Entity, bullet, fire, explosion, collision, melee, steam, BOOL keep, drown)
 CV_NATIVE(CLEAR_PED_TASKS_IMMEDIATELY, 0xAAA34F8A7CB32098) // void (Ped)
 CV_NATIVE(SET_PED_CURRENT_WEAPON_VISIBLE, 0x0725A4CCFDED9A70) // void (Ped, BOOL visible, BOOL deselect, BOOL, BOOL)
@@ -370,6 +373,8 @@ CV_NATIVE(GET_CURR_WEATHER_STATE, 0xF3BBE884A14BB413) // void (Hash* from, Hash*
 CV_NATIVE(SET_CURR_WEATHER_STATE, 0x578C752848ECFA0C) // void (Hash from, Hash to, float percentTo)
 CV_NATIVE(LOCK_MINIMAP_ANGLE, 0x299FAEBB108AE05B)   // void (int angle 0..360): the minimap turned to this angle
 CV_NATIVE(UNLOCK_MINIMAP_ANGLE, 0x8183455E16C42E3A) // void (): GTA turns the minimap again
+CV_NATIVE(GET_PED_BONE_INDEX, 0x3F428D08BE5AAE31) // int (Ped, int boneTag): the bone's index in the ped's skeleton
+CV_NATIVE(START_PARTICLE_FX_NON_LOOPED_ON_PED_BONE, 0x0E7E72961BA18619) // BOOL (const char*, Ped, 3 offset, 3 rot, int boneIndex, float scale, 3 BOOL axis)
 #undef CV_NATIVE
 
 } // namespace gta

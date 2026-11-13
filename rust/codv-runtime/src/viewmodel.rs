@@ -164,9 +164,11 @@ impl Viewmodels {
         });
     }
 
-    fn build(&self, id: u32, name: &str) -> Result<Rig, String> {
+    fn build(&self, id: u32, name: &str, dressed_as: &str) -> Result<Rig, String> {
         let disk = &self.disk;
         let row = disk.rows.get(name).ok_or_else(|| format!("{name}: no viewmodel was imported"))?;
+        // An underbarrel weapon shows its gun's parts (the gun's hidden tags: its sights, its silencer).
+        let parts = disk.rows.get(dressed_as).unwrap_or(row);
         let hands = disk.model(row.s("hand_model"))?;
         let gun = disk.model(row.s("gun_model"))?;
         let clips = (0..v::SLOTS)
@@ -175,7 +177,7 @@ impl Viewmodels {
                 if n.is_empty() { None } else { disk.clip(&n) }
             })
             .collect();
-        let hide: Vec<String> = row.s("hide_tags").split(',').filter(|t| !t.is_empty()).map(str::to_owned).collect();
+        let hide: Vec<String> = parts.s("hide_tags").split(',').filter(|t| !t.is_empty()).map(str::to_owned).collect();
         // The rocket on a loaded launcher (the RPG-7's), when the setup imported it.
         let rocket = match row.s("rocket_model") {
             "" => None,
@@ -194,8 +196,19 @@ impl Viewmodels {
     }
 
     /// After the weapon's tick: (re)build the rig for the held weapon, then
-    /// animate and place it.
-    pub fn tick(&mut self, id: u32, name: &str, player: &Mw2Player, frame: &GunFrame, dt: f32, log: &dyn Fn(&str)) {
+    /// animate and place it. `dressed_as`: the gun whose parts the view model shows ("": `name`'s own; an
+    /// underbarrel weapon's: its gun's), `id` then a key of its own for that pair.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tick(
+        &mut self,
+        id: u32,
+        name: &str,
+        dressed_as: &str,
+        player: &Mw2Player,
+        frame: &GunFrame,
+        dt: f32,
+        log: &dyn Fn(&str),
+    ) {
         if id == 0 {
             self.rig = None;
             return;
@@ -205,7 +218,7 @@ impl Viewmodels {
             if self.failed.contains(&id) {
                 return;
             }
-            match self.build(id, name) {
+            match self.build(id, name, dressed_as) {
                 Ok(rig) => {
                     let known = self.weapon_mesh.get(&id).copied().filter(|m| self.meshes.iter().any(|(k, _)| k == m));
                     if let Some(m) = known {

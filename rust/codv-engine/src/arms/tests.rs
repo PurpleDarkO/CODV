@@ -643,3 +643,60 @@ fn a_throwing_knife_leaves_the_hand() {
     );
     assert_eq!(thrown.iter().map(|t| t.0).collect::<Vec<_>>(), vec![id], "one knife thrown");
 }
+
+/// A rifle with MW2's underbarrel shotgun: the gun names its alternate, which only it carries.
+fn underbarrel_table() -> Table {
+    let mut gun = test_gun("rifle_shotgun_mp", 0);
+    gun.strings.push(("alternate".into(), "rifle_shotgun_attach_mp".into()));
+    gun.numbers.push(("alternate_raise_time_ms".into(), 400.0));
+    let mut alt = test_gun("rifle_shotgun_attach_mp", 1);
+    for (k, v) in [("inventory_type", 3.0), ("weap_class", 4.0), ("clip_size", 4.0), ("shots_per_fire", 6.0)] {
+        if let Some(e) = alt.numbers.iter_mut().find(|(n, _)| n == k) {
+            e.1 = v;
+        }
+    }
+    alt.numbers.push(("alternate_raise_time_ms".into(), 600.0));
+    let mut t = table();
+    t.weapons.push(gun);
+    t.weapons.push(alt);
+    t
+}
+
+#[test]
+fn the_underbarrel_weapon_switches_in_and_back_with_its_own_rounds() {
+    let mut rig = Rig::new(&underbarrel_table(), &["rifle_shotgun_mp", "semi_mp"]);
+    let (rifle, alt) =
+        (rig.arsenal.id("rifle_shotgun_mp").unwrap(), rig.arsenal.id("rifle_shotgun_attach_mp").unwrap());
+    assert_eq!(rig.arsenal.alternate(rifle), Some(alt));
+    assert!(rig.arsenal.is_underbarrel(alt) && !rig.arsenal.is_underbarrel(rifle));
+    assert_eq!(rig.arsenal.alternate(rig.arsenal.id("semi_mp").unwrap()), None);
+    rig.frames(button::ATTACK, 5);
+    let rifle_clip = rig.frame(0).clip;
+    assert!(rifle_clip < 10);
+    // To the shotgun: its own raise (alternate_raise_time_ms), its own magazine, six pellets a shot.
+    assert!(rig.gunner.switch_alternate());
+    let mut t = 0;
+    loop {
+        let f = rig.frame(0);
+        t += MS;
+        if f.weapon == alt && f.weaponstate == 0 {
+            assert_eq!(f.clip, 4, "the shotgun's own magazine");
+            break;
+        }
+        assert!(t < 3000);
+    }
+    assert!((550..=750).contains(&t), "the shotgun's alt raise (600): {t}");
+    assert_eq!(rig.gunner.underbarrel_parent(), Some(rifle));
+    let shot = rig.frames(button::ATTACK, 3).into_iter().find(|f| f.fired).expect("a shot");
+    assert_eq!(shot.shots.len(), 6);
+    // Back to the rifle with its magazine as it was; the next gun after the rifle is the semi.
+    rig.frames(0, 60);
+    assert!(rig.gunner.switch_alternate());
+    let back = rig.frames(0, 150).pop().unwrap();
+    assert_eq!((back.weapon, back.clip), (rifle, rifle_clip));
+    assert_eq!(rig.gunner.underbarrel_parent(), None);
+    // A gun without one: no switch.
+    rig.gunner.select(1);
+    rig.frames(0, 150);
+    assert!(!rig.gunner.switch_alternate());
+}

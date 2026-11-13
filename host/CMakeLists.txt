@@ -39,6 +39,7 @@ add_library(CodVLegacy SHARED
   src/grenade_feed.cpp
   src/equipment.cpp
   src/tracers.cpp
+  src/heartbeat.cpp
   src/tactical.cpp
   src/gta_audio_re.cpp
   src/gta_audio_dsp.cpp

@@ -19,6 +19,7 @@
 #include "equipment_rules.h"
 #include "tactical_rules.h"
 #include "tracer_rules.h"
+#include "heartbeat_rules.h"
 #include "minimap_rules.h"
 #include "radar_box.h"
 #include "mw2_input.h"
@@ -586,6 +587,47 @@ static void TracerRules() {
     CHECK(right == 0.0f); // past full ADS: still the centre
 }
 
+static void HeartbeatRules() {
+    using namespace heartbeat;
+    // Facing north (heading 0): ahead is north, the right is east; behind, too distant or too wide is off.
+    Dot d;
+    CHECK(Project(0.0f, 20.0f, 0.0f, d) && Near(d.s, 0.5f) && Near(d.t, 0.5f) && Near(d.d, 0.5f));
+    CHECK(Project(10.0f, 10.0f, 0.0f, d) && d.s > 0.5f && Near(d.t, 0.75f));
+    CHECK(!Project(0.0f, -5.0f, 0.0f, d) && !Project(0.0f, kRange + 1.0f, 0.0f, d));
+    CHECK(!Project(kRange, 5.0f, 0.0f, d));
+    // GTA headings grow to the left: facing west (90), west is ahead and north is on the right.
+    CHECK(Project(-20.0f, 0.0f, 90.0f, d) && Near(d.s, 0.5f) && Near(d.t, 0.5f));
+    CHECK(Project(-10.0f, 10.0f, 90.0f, d) && d.s > 0.5f);
+    // The sweep: from the player to the distant corners in kSweepMs; a dot fades to kFadeTo by the next pulse.
+    CHECK(Sweep(0) == 0.0f && Near(Sweep(kSweepMs), Reach()) && Reach() > 1.0f);
+    CHECK(Fade(0.0f) == 1.0f && Near(Fade(static_cast<float>(kPeriodMs)), kFadeTo) && Near(Fade(1e6f), kFadeTo));
+    // A display: a dot shows once the sweep reaches it, an old one until the sweep passes where it was.
+    Display screen;
+    std::vector<Shown> shown;
+    CHECK(screen.Due(100) && screen.Frame(100, shown) == 0.0f && shown.empty());
+    Dot close{0.5f, 0.75f, 0.25f}, distant{0.5f, 0.1f, 0.9f};
+    screen.Pulse(1000, {close, distant});
+    CHECK(!screen.Due(1000 + kPeriodMs - 1) && screen.Due(1000 + kPeriodMs));
+    screen.Frame(1000, shown);
+    CHECK(shown.empty());
+    screen.Frame(1000 + static_cast<std::uint32_t>(FoundAt(0.5f)), shown);
+    CHECK(shown.size() == 1 && Near(shown[0].t, 0.75f) && shown[0].alpha > 0.9f);
+    screen.Frame(1000 + kSweepMs, shown);
+    CHECK(shown.size() == 2);
+    // The next pulse finds nobody: the old dots stay until the sweep passes them, faded.
+    screen.Pulse(1000 + kPeriodMs, {});
+    screen.Frame(1000 + kPeriodMs + static_cast<std::uint32_t>(FoundAt(0.5f)), shown);
+    CHECK(shown.size() == 1 && Near(shown[0].t, 0.1f) && shown[0].alpha < 0.5f);
+    screen.Frame(1000 + kPeriodMs + kSweepMs, shown);
+    CHECK(shown.empty());
+    // Never more than kMaxDots.
+    screen.Pulse(9000, std::vector<Dot>(40, close));
+    screen.Frame(9000 + kSweepMs, shown);
+    CHECK(static_cast<int>(shown.size()) == kMaxDots);
+    screen.Clear();
+    CHECK(screen.Due(9001) && screen.Frame(9001, shown) == 0.0f && shown.empty());
+}
+
 static void MinimapRules() {
     // The minimap's angle: whole degrees in 0..359 for any heading.
     CHECK(minimap::Angle(0.0f) == 0 && minimap::Angle(90.0f) == (minimap::kFlip ? 270 : 90));
@@ -626,6 +668,7 @@ int main() {
     RadarBox();
     TacticalRules();
     TracerRules();
+    HeartbeatRules();
     MinimapRules();
     EquipmentRules();
     InputMap();

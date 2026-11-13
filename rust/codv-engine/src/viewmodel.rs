@@ -690,8 +690,10 @@ fn append_model(mesh: &mut Mesh, m: &vm::Model, bone_base: usize, hide: &[u32; 6
             continue;
         }
         let name = s.material.name.to_ascii_lowercase();
-        // Scope lenses and reticles need the scope's render path (later).
-        if name.contains("lens") || name.contains("reticle") {
+        // Scope and sight lenses (glass) need the scope's render path (later); the reticles are surfaces of
+        // their own (the red dot's mtl_weapon_red_cross_small, the holographic's ..._red_dot3, the ACOG's
+        // ..._reticle), drawn by the host as light (CV_VM_DRAW_EMISSIVE).
+        if name.contains("lens") {
             continue;
         }
         let base = mesh.vertices.len() as u32;

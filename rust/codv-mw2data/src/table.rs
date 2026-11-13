@@ -124,8 +124,83 @@ pub fn from_json(text: &str) -> Result<Table, String> {
     Ok(t)
 }
 
+/// The sound fields an attachment variant often leaves empty in MW2's zones: a variant that sounds as its base
+/// gun points its sounds at the aliases the base already loaded, which the import does not follow.
+pub const VARIANT_SOUND_FIELDS: [&str; 6] = [
+    "fire_sound",
+    "fire_sound_player",
+    "fire_last_sound_player",
+    "empty_fire_sound_player",
+    "raise_sound_player",
+    "melee_swipe_sound_player",
+];
+
+/// Fills an attachment variant's empty sound fields from the gun it sounds as: `<base>_silencer_mp` for a
+/// silenced variant (when that one has the sound), else `<base>_mp` (m4_reflex_mp fires as m4_mp,
+/// m4_reflex_silencer_mp as m4_silencer_mp). Fields the variant has are kept. How many fields were filled.
+pub fn fill_variant_sounds(table: &mut Table) -> usize {
+    let index: std::collections::HashMap<String, usize> =
+        table.weapons.iter().enumerate().map(|(i, r)| (r.name.clone(), i)).collect();
+    let mut fills: Vec<(usize, &'static str, String)> = Vec::new();
+    for (i, row) in table.weapons.iter().enumerate() {
+        let Some(stem) = row.name.strip_suffix("_mp") else { continue };
+        let Some((base, parts)) = stem.split_once('_') else { continue };
+        let mut sources = Vec::new();
+        if parts.split('_').any(|p| p == "silencer") {
+            sources.push(format!("{base}_silencer_mp"));
+        }
+        sources.push(format!("{base}_mp"));
+        for field in VARIANT_SOUND_FIELDS {
+            if !row.s(field).is_empty() {
+                continue;
+            }
+            let found = sources
+                .iter()
+                .filter(|s| **s != row.name)
+                .filter_map(|s| index.get(s).map(|&j| table.weapons[j].s(field)))
+                .find(|v| !v.is_empty());
+            if let Some(v) = found {
+                fills.push((i, field, v.to_owned()));
+            }
+        }
+    }
+    let n = fills.len();
+    for (i, field, v) in fills {
+        let row = &mut table.weapons[i];
+        row.strings.retain(|(k, _)| k != field);
+        row.strings.push((field.to_owned(), v));
+    }
+    n
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn variants_sound_as_their_gun() {
+        use super::*;
+        let row = |name: &str, fire: &str| Row {
+            name: name.into(),
+            strings: if fire.is_empty() { Vec::new() } else { vec![("fire_sound_player".into(), fire.into())] },
+            ..Default::default()
+        };
+        let mut t = Table {
+            weapons: vec![
+                row("m4_mp", "weap_m4carbine_fire_plr"),
+                row("m4_silencer_mp", "weap_m4silenced_fire_plr"),
+                row("m4_reflex_mp", ""),
+                row("m4_reflex_silencer_mp", ""),
+                row("m4_shotgun_mp", "own_sound"),
+                row("frag_grenade_mp", ""),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(fill_variant_sounds(&mut t), 2);
+        assert_eq!(t.weapons[2].s("fire_sound_player"), "weap_m4carbine_fire_plr");
+        assert_eq!(t.weapons[3].s("fire_sound_player"), "weap_m4silenced_fire_plr");
+        assert_eq!(t.weapons[4].s("fire_sound_player"), "own_sound");
+        assert_eq!(t.weapons[5].s("fire_sound_player"), "");
+    }
+
     use super::*;
 
     #[test]

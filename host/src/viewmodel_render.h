@@ -7,6 +7,7 @@
 // X in alpha (MW2's layout). Independent of ScriptHookV.
 #include "codv_runtime.h"
 #include "dds.h"
+#include "heartbeat_rules.h"
 
 #include <windows.h>
 #include <d3d11.h>
@@ -23,6 +24,7 @@ using LogFn = void (*)(const char*);
 struct Draw {
     UINT first = 0, count = 0, flags = 0; // CvVmDrawFlags
     int color = -1, normal = -1;          // into Mesh::textures
+    float uv[4] = {};                     // its UVs' bounds (u0, v0, u1, v1): the heartbeat screen's display
 };
 
 struct Mesh {
@@ -31,6 +33,7 @@ struct Mesh {
     std::vector<std::uint32_t> indices;
     std::vector<Draw> draws;
     std::vector<std::shared_ptr<const dds::Texture>> textures;
+    bool tracker = false; // a heartbeat sensor's screen is on the gun (CV_VM_DRAW_TRACKER)
 };
 
 struct Frame {
@@ -45,6 +48,7 @@ struct Frame {
     // y1 of a box left out of the gun (x1 <= x0: none).
     float keepOut[4] = {};
     float keepOutAlpha = 0.18f; // how much of the gun shows in that box (0: none)
+    heartbeat::Screen tracker;  // the heartbeat sensor's display (on the CV_VM_DRAW_TRACKER surface)
 };
 
 void SetLog(LogFn log);

@@ -17,6 +17,8 @@
 //   frag     INPUT_THROW_GRENADE (58) / pad INPUT_COVER (44)  G / RB  -> FRAG (hold cooks, release throws)
 //   special  INPUT_MP_TEXT_CHAT_ALL (245, unused in story mode) / pad D-pad left  T / D-pad left  -> SMOKE
 //   slots    keys 1 / 2 / 3 / 5 (NumberKeys=1): primary / secondary / sniper / launcher (CS-style)
+//   under    X (INPUT_VEH_DUCK 73, unused on foot) / pad D-pad down: the gun's underbarrel weapon (grenade
+//            launcher, shotgun) and back -> CV_WEAPON_REQUEST_ALTERNATE
 //   lean     Q / E held (INPUT_COVER 44 / INPUT_CONTEXT 51, keyboard and mouse) -> CODV's LEAN_LEFT / RIGHT;
 //            on a pad, L3 held with the left stick pushed left / right (no strafe, no crouch then)
 //
@@ -41,6 +43,7 @@ struct Raw {
     bool sprint = false, jump = false, duck = false, ads = false, attack = false;
     bool reload = false, melee = false, frag = false, smoke = false; // smoke: the special grenade (T)
     bool nextWeapon = false; // a press this frame (an edge, not held)
+    bool alternate = false;  // the underbarrel weapon and back: a press this frame (an edge)
     bool leanLeft = false, leanRight = false; // held
     int slot = 0;            // slot picked this frame: 1 primary, 2 secondary, 3 sniper, 4 launcher (0 none)
 };
@@ -163,6 +166,7 @@ public:
         in.buttons = b;
         in.weapon_request = r.nextWeapon ? 1u : 0u;
         if (r.slot >= 1 && r.slot <= 4) in.weapon_request = 1u + static_cast<std::uint32_t>(r.slot); // loadout slot 0..3
+        if (r.alternate) in.weapon_request = CV_WEAPON_REQUEST_ALTERNATE;
         return in;
     }
 

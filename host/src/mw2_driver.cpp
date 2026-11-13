@@ -529,6 +529,13 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
     r.frag = Pressed(r.mouse ? input::kThrowGrenade : controls::kCover);
     // MW2's special grenade: T on the keyboard (GTA's chat key, unused in story mode), D-pad left on a pad.
     r.smoke = r.mouse ? Pressed(input::kTacticalKey) : (padButtons_ & pad::kDpadLeft) != 0;
+    // The underbarrel weapon (grenade launcher, shotgun) and back: X on the keyboard, D-pad down on a pad (a press).
+    {
+        const bool down = (padButtons_ & pad::kDpadDown) != 0;
+        r.alternate = r.mouse ? Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, input::kAlternateKey) != FALSE
+                              : down && !altPadHeld_;
+        altPadHeld_ = down;
+    }
     // CODV's lean: Q / E on the keyboard (GTA's cover and context keys; MW2 mode takes them).
     if (r.mouse) r.leanLeft = Pressed(controls::kCover), r.leanRight = Pressed(ksrules::kContext);
     if (s.numberKeys)

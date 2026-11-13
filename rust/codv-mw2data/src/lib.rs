@@ -57,6 +57,18 @@ pub fn is_holdable_gun(row: &table::Row) -> bool {
     (row.i("weap_type") == 0 && holdable(row)) || is_launcher(row)
 }
 
+/// The underbarrel weapons the holdable guns carry (MW2's alternates: gl_m4_mp, m4_shotgun_attach_mp ...):
+/// imported with the guns (their animations, images and sounds), held through their gun.
+pub fn underbarrel_names(table: &table::Table) -> std::collections::HashSet<String> {
+    table
+        .weapons
+        .iter()
+        .filter(|r| is_holdable_gun(r))
+        .map(|r| r.s("alternate").to_owned())
+        .filter(|n| !n.is_empty())
+        .collect()
+}
+
 /// MW2's launchers a player carries (RPG-7, AT4, Stinger, Javelin, Thumper): projectile
 /// weapons of the rocket launcher (7) or grenade launcher (6) class in the main inventory
 /// (the guns' underslung launchers are alt modes, the killstreaks' guns other inventories).
@@ -141,10 +153,12 @@ pub fn import_viewmodels(
     let mut want_anims = BTreeSet::new();
     let mut want_images = BTreeSet::new();
     let mut summary = ViewmodelSummary { skipped_models: found.skipped.len(), ..Default::default() };
+    let underbarrel = underbarrel_names(table);
     // Guns, the thrown frag-class grenades, CODV's equipment on the frag button and the special grenades on
     // the smoke button (their throw animations and HUD icons).
     for row in table.weapons.iter_mut().filter(|r| {
         is_holdable_gun(r)
+            || underbarrel.contains(&r.name)
             || (r.i("weap_type") == 1
                 && (r.i("offhand_class") == 1
                     || EQUIPMENT.contains(&r.name.as_str())
@@ -902,7 +916,8 @@ pub fn import_sounds(
     want.extend(streak_sounds.iter().cloned());
     want.extend(KILLSTREAK_SOUNDS.iter().map(|s| (*s).to_owned()));
     want.extend(movement_sounds());
-    for row in table.weapons.iter().filter(|r| is_holdable_gun(r)) {
+    let underbarrel = underbarrel_names(table);
+    for row in table.weapons.iter().filter(|r| is_holdable_gun(r) || underbarrel.contains(&r.name)) {
         for f in PLAYER_SOUND_FIELDS {
             want.push(row.s(f).to_ascii_lowercase());
         }

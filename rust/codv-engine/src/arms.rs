@@ -81,6 +81,11 @@ pub struct Arsenal {
     /// Thrown offhand grenades (frag class): their weapon facts and how they fly.
     /// Ids follow the guns' (guns.len() + 1 ...).
     offhand: Vec<(Gun, Throw)>,
+    /// Per gun (id - 1): its underbarrel weapon's id (MW2's alternate: the grenade launcher's or the
+    /// shotgun's alt mode), 0 none.
+    alternates: Vec<u32>,
+    /// Per gun (id - 1): it is an underbarrel weapon (held only through its gun, never on its own).
+    underbarrel: Vec<bool>,
 }
 
 /// MW2's equipment CODV puts on the frag button besides the frag (their rows are offhand class 5,
@@ -320,10 +325,20 @@ fn throw_facts(r: &Row) -> Throw {
 
 impl Arsenal {
     /// The table's weapons a player can hold: bullet guns (with a magazine and a
-    /// fire time) and the launchers (codv_mw2data::is_holdable_gun); killstreak
-    /// guns and alt modes are left out. Returns the weapons refused too.
+    /// fire time) and the launchers (codv_mw2data::is_holdable_gun), and their
+    /// underbarrel weapons (MW2's alternates: the grenade launcher, the shotgun);
+    /// killstreak guns are left out. Returns the weapons refused too.
     pub fn from_table(t: &Table) -> (Arsenal, Vec<(String, String)>) {
         let global = t.location.unwrap_or(w::LOCATION_DAMAGE_IDENTITY);
+        // The underbarrel weapons the holdable guns name.
+        let alt_names: std::collections::HashSet<&str> = t
+            .weapons
+            .iter()
+            .filter(|r| codv_mw2data::is_holdable_gun(r))
+            .map(|r| r.s("alternate"))
+            .filter(|n| !n.is_empty())
+            .collect();
+        let mut underbarrel = Vec::new();
         let mut guns = Vec::new();
         let mut refused = Vec::new();
         let mut offhand = Vec::new();
@@ -348,8 +363,10 @@ impl Arsenal {
                 }
                 continue;
             }
-            // Bullet guns, and MW2's launchers (CODV fires their rockets as GTA's: the host's stand-in).
-            if !codv_mw2data::is_holdable_gun(r) {
+            // Bullet guns, and MW2's launchers (CODV fires their rockets as GTA's: the host's stand-in), and
+            // the guns' underbarrel weapons (with a magazine and a fire time).
+            let alt = alt_names.contains(r.name.as_str()) && r.i("clip_size") > 0 && r.i("fire_time_ms") > 0;
+            if !codv_mw2data::is_holdable_gun(r) && !alt {
                 continue;
             }
             match combat_facts(r, global) {
@@ -379,10 +396,21 @@ impl Arsenal {
                     kick: kick(r),
                     strings: r.strings.clone(),
                 }),
-                Err(e) => refused.push((r.name.clone(), format!("{e:?}"))),
+                Err(e) => {
+                    refused.push((r.name.clone(), format!("{e:?}")));
+                    continue;
+                }
             }
+            underbarrel.push(alt && !codv_mw2data::is_holdable_gun(r));
         }
-        (Arsenal { guns, offhand }, refused)
+        let index: std::collections::HashMap<&str, u32> =
+            guns.iter().enumerate().map(|(i, g)| (g.name.as_str(), i as u32 + 1)).collect();
+        let alternates = guns
+            .iter()
+            .zip(&underbarrel)
+            .map(|(g, &under)| if under { 0 } else { index.get(g.string("alternate")).copied().unwrap_or(0) })
+            .collect();
+        (Arsenal { guns, offhand, alternates, underbarrel }, refused)
     }
 
     pub fn len(&self) -> usize {
@@ -399,6 +427,14 @@ impl Arsenal {
     }
     pub fn guns(&self) -> &[Gun] {
         &self.guns
+    }
+    /// Gun `id`'s underbarrel weapon (the grenade launcher's or the shotgun's alt mode), if it has one.
+    pub fn alternate(&self, id: u32) -> Option<u32> {
+        id.checked_sub(1).and_then(|i| self.alternates.get(i as usize)).copied().filter(|&a| a != 0)
+    }
+    /// Whether gun `id` is an underbarrel weapon (held only through its gun).
+    pub fn is_underbarrel(&self, id: u32) -> bool {
+        id.checked_sub(1).and_then(|i| self.underbarrel.get(i as usize)).copied().unwrap_or(false)
     }
     /// A thrown grenade's id by name (ids after the guns').
     pub fn offhand_id(&self, name: &str) -> Option<u32> {
@@ -485,9 +521,13 @@ pub struct Gunner {
     /// This frame's usercmd forward / right move (the aim spread grows while moving).
     moves: (i8, i8),
     loadout: Vec<u32>,
+    /// Per loadout gun: its underbarrel weapon (0 none), carried with it.
+    alternates: Vec<u32>,
     ammo: Vec<(u32, i32, i32)>,
     used: Vec<u32>,
     want: u32,
+    /// The switch asked for is MW2's to the underbarrel weapon or back (its own drop and raise).
+    alt_switch: bool,
     old_buttons: u32,
     camera: [w::RecoilAxis; 3],
     kick_angles: [f32; 3],
@@ -506,7 +546,15 @@ impl Gunner {
     /// Carrying `loadout` (weapon ids, the first in hand), full ammo.
     pub fn new(arsenal: &Arsenal, loadout: &[u32]) -> Gunner {
         let loadout: Vec<u32> = loadout.iter().copied().filter(|&id| arsenal.gun(id).is_some()).collect();
-        let ammo = loadout
+        let alternates: Vec<u32> = loadout.iter().map(|&id| arsenal.alternate(id).unwrap_or(0)).collect();
+        // Each carried weapon's rounds: the guns' and their underbarrel weapons' (once each).
+        let mut carried: Vec<u32> = Vec::new();
+        for &id in loadout.iter().chain(alternates.iter().filter(|&&a| a != 0)) {
+            if !carried.contains(&id) {
+                carried.push(id);
+            }
+        }
+        let ammo = carried
             .iter()
             .map(|&id| {
                 let f = &arsenal.gun(id).unwrap().facts;
@@ -528,9 +576,11 @@ impl Gunner {
             reserve_scale: 1.0,
             moves: (0, 0),
             loadout,
+            alternates,
             ammo,
             used: vec![first],
             want: first,
+            alt_switch: false,
             old_buttons: 0,
             camera: Default::default(),
             kick_angles: [0.0; 3],
@@ -587,13 +637,51 @@ impl Gunner {
     pub fn select(&mut self, slot: usize) {
         if let Some(&id) = self.loadout.get(slot) {
             self.want = id;
+            self.alt_switch = false;
         }
     }
-    /// Asks for the next weapon in the loadout.
+    /// Asks for the next weapon in the loadout (from an underbarrel weapon: the one after its gun).
     pub fn cycle(&mut self) {
-        if let Some(i) = self.loadout.iter().position(|&id| id == self.want) {
+        let at = self.parent_of(self.want).unwrap_or(self.want);
+        if let Some(i) = self.loadout.iter().position(|&id| id == at) {
             self.want = self.loadout[(i + 1) % self.loadout.len()];
+            self.alt_switch = false;
         }
+    }
+    /// The loadout gun whose underbarrel weapon `id` is (the one in hand or asked for first).
+    fn parent_of(&self, id: u32) -> Option<u32> {
+        if id == 0 || self.loadout.contains(&id) {
+            return None;
+        }
+        let held = self.hands[0].weapon;
+        let owner = |g: u32| self.loadout.iter().zip(&self.alternates).any(|(&l, &a)| l == g && a == id);
+        if owner(held) {
+            return Some(held);
+        }
+        self.loadout.iter().zip(&self.alternates).find(|(_, a)| **a == id).map(|(&l, _)| l)
+    }
+    /// MW2's switch to the held gun's underbarrel weapon (the grenade launcher, the shotgun), or from it
+    /// back to its gun. False when the gun has none.
+    pub fn switch_alternate(&mut self) -> bool {
+        let from = if self.want != 0 { self.want } else { self.hands[0].weapon };
+        let to = match self.loadout.iter().position(|&id| id == from) {
+            Some(i) => self.alternates[i],
+            None => self.parent_of(from).unwrap_or(0),
+        };
+        if to == 0 {
+            return false;
+        }
+        self.want = to;
+        self.alt_switch = true;
+        true
+    }
+    /// The weapon asked for (in hand once the switch is done).
+    pub fn wanted(&self) -> u32 {
+        self.want
+    }
+    /// The gun an underbarrel weapon in hand belongs to (its gun's parts stay on the view model), else None.
+    pub fn underbarrel_parent(&self) -> Option<u32> {
+        self.parent_of(self.hands[0].weapon)
     }
     /// MW2's Scavenger pickup (_weapons.gsc handleScavengerBagPickup): every carried gun's
     /// spare rounds grow by one magazine (up to its spare-round limit with the reserve scale)
@@ -762,7 +850,9 @@ impl Gunner {
             last_weapon_hand: 0,
             f_weapon_pos_frac: ps.f_weapon_pos_frac,
             is_in_air: ps.ground_entity_num == playerstate_iw4::ENTITYNUM_NONE,
-            cmd_weapon_owned: self.loadout.contains(&target),
+            cmd_weapon_owned: self.loadout.contains(&target) || self.alternates.contains(&target),
+            alternate_switch: self.alt_switch,
+            switch_alternate_raise_time_ms: target_facts.alternate_raise_time_ms,
             switch_raise_time_ms: target_facts.raise_time_ms,
             switch_quick_raise_time_ms: target_facts.quick_raise_time_ms,
             switch_first_raise_time_ms: if self.used.contains(&target) {
@@ -822,6 +912,10 @@ impl Gunner {
             .then_some(self.off_hand_index as u32);
         self.old_buttons = buttons;
         let hand = self.hands[0];
+        // The underbarrel switch done (the weapon asked for is in hand, raising): later switches are plain.
+        if hand.weapon == self.want {
+            self.alt_switch = false;
+        }
         ps.weapon = hand.weapon;
         ps.weaponstate_primary = hand.weaponstate;
         ps.weapon_time = hand.weapon_time;
