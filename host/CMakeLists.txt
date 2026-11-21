@@ -40,6 +40,8 @@ add_library(CodVLegacy SHARED
   src/equipment.cpp
   src/tracers.cpp
   src/heartbeat.cpp
+  src/mission_log.cpp
+  src/doors.cpp
   src/tactical.cpp
   src/gta_audio_re.cpp
   src/gta_audio_dsp.cpp
@@ -55,8 +57,15 @@ if(EXISTS "${CODV_EXPERIMENTAL_DIR}/host/experimental.h")
   target_compile_definitions(CodVLegacy PRIVATE CODV_EXPERIMENTAL=1)
   set(CODV_WITH_EXPERIMENTAL ON)
 endif()
+# CODV's version, shown in the menu: the runtime crate's (one version for the whole mod).
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../rust/codv-runtime/Cargo.toml" CODV_VERSION_LINE REGEX "^version = \"[^\"]+\"" LIMIT_COUNT 1)
+string(REGEX REPLACE "^version = \"([^\"]+)\".*" "\\1" CODV_VERSION "${CODV_VERSION_LINE}")
+if(NOT CODV_VERSION)
+  set(CODV_VERSION "dev")
+endif()
+message(STATUS "CODV: version ${CODV_VERSION}")
 target_compile_features(CodVLegacy PRIVATE cxx_std_20)
-target_compile_definitions(CodVLegacy PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(CodVLegacy PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX CODV_VERSION="${CODV_VERSION}")
 target_include_directories(CodVLegacy PRIVATE include "${SHVDIR}/inc")
 target_link_libraries(CodVLegacy PRIVATE "${SHVDIR}/lib/ScriptHookV.lib" version psapi d3d11 dxgi d3dcompiler)
 set_target_properties(CodVLegacy PROPERTIES PREFIX "" SUFFIX ".asi")

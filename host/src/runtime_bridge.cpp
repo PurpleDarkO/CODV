@@ -1,5 +1,7 @@
 #include "runtime_bridge.h"
 
+#include <algorithm>
+
 namespace {
 template <typename Fn>
 bool Resolve(HMODULE m, const char* name, Fn& out, std::string& error) {
@@ -52,6 +54,8 @@ bool RuntimeBridge::Load(const wchar_t* dllPath, const std::string& dataRoot, co
     boardNotice_ = reinterpret_cast<CvMw2BoardNoticeFn>(GetProcAddress(module_, "cv_mw2_board_notice"));
     aliasLoop_ = reinterpret_cast<CvAliasLoopFn>(GetProcAddress(module_, "cv_alias_loop"));
     aliasLevel_ = reinterpret_cast<CvAliasLevelFn>(GetProcAddress(module_, "cv_alias_level"));
+    vmFx_ = reinterpret_cast<CvVmFxFn>(GetProcAddress(module_, "cv_vm_fx"));
+    supply_ = reinterpret_cast<CvMw2SupplyFn>(GetProcAddress(module_, "cv_mw2_supply"));
     apiVersion_ = version();
     if (apiVersion_ != CODV_ABI_VERSION) {
         error = "runtime ABI " + std::to_string(apiVersion_) + ", host expects " + std::to_string(CODV_ABI_VERSION) +
@@ -185,6 +189,15 @@ std::vector<CvWeaponInfo> RuntimeBridge::Mw2Guns() const {
     return out;
 }
 
+std::string RuntimeBridge::Mw2GunLabel(std::uint32_t index) const {
+    if (!runtime_) return {};
+    CvWeaponInfo w{};
+    w.size = sizeof(w);
+    if (!mw2GunInfo_(runtime_, index, &w)) return {};
+    w.label[sizeof(w.label) - 1] = '\0';
+    return w.label;
+}
+
 std::uint32_t RuntimeBridge::Mw2Grenades(std::vector<CvGrenade>& out) {
     out.resize(32);
     const std::uint32_t n = runtime_ ? mw2Grenades_(runtime_, out.data(), static_cast<std::uint32_t>(out.size())) : 0;
@@ -225,6 +238,16 @@ std::uint32_t RuntimeBridge::PlayAlias(const char* alias) {
 
 bool RuntimeBridge::Splash(const char* title, const char* description, const float glow[4]) {
     return runtime_ && splash_ && title && splash_(runtime_, title, description, glow) != 0;
+}
+
+void RuntimeBridge::VmFx(std::vector<CvVmFxQuad>& quads, std::vector<CvVmFxLight>& lights) const {
+    constexpr std::uint32_t kQuads = 512, kLights = 8;
+    quads.resize(kQuads);
+    lights.resize(kLights);
+    std::uint32_t count = 0, lit = 0;
+    if (runtime_ && vmFx_) lit = vmFx_(runtime_, quads.data(), kQuads, &count, lights.data(), kLights);
+    quads.resize(std::min(count, kQuads));
+    lights.resize(std::min(lit, kLights));
 }
 
 std::string RuntimeBridge::BlockedWhy(float forward, float right) {
@@ -280,6 +303,10 @@ std::vector<std::string> RuntimeBridge::VmReadyImages() const {
         }
     }
     return out;
+}
+
+std::uint32_t RuntimeBridge::Supply(std::uint32_t kind) {
+    return runtime_ && supply_ ? supply_(runtime_, kind) : 0;
 }
 
 bool RuntimeBridge::Refill() {

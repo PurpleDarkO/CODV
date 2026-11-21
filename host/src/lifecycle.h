@@ -4,6 +4,10 @@
 // scenes that take the player's control, missions (unless allowed), death.
 #include <types.h>
 
+#include "lifecycle_rules.h"
+
+#include <string>
+
 namespace lifecycle {
 
 struct Settings {
@@ -13,6 +17,20 @@ struct Settings {
 // Why CODV must not drive the player right now (nullptr: allowed).
 // (The CODV menu is not a reason: MW2 keeps the player and the view, its input frozen meanwhile.)
 const char* Blocked(Ped ped, const Settings& s);
+
+class Settle {
+public:
+    // Why CODV waits for the player to settle (nullptr: settled). `note` gets a line for the log when the wait
+    // begins or ends (empty otherwise). Called every frame, whether CODV drives or not.
+    const char* Update(Ped ped, DWORD now, std::string& note);
+
+private:
+    Ped ped_ = 0;
+    float at_[3] = {};
+    bool waiting_ = false, have_ = false;
+    DWORD since_ = 0, last_ = 0;
+    unsigned still_ = 0;
+};
 
 // Logs changes of the blocking reason once (not every frame).
 class ReasonLog {

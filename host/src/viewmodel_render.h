@@ -36,6 +36,16 @@ struct Mesh {
     bool tracker = false; // a heartbeat sensor's screen is on the gun (CV_VM_DRAW_TRACKER)
 };
 
+// One sprite of MW2's view muzzle flash (CvVmFxQuad): corners in view space (inches), atlas cell, colour
+// (linear 0..1), added or alpha-blended, its colour map.
+struct FxQuad {
+    float corners[4][3] = {};
+    float uv[4] = {0, 0, 1, 1};
+    float rgba[4] = {1, 1, 1, 1};
+    bool additive = false;
+    std::shared_ptr<const dds::Texture> texture;
+};
+
 struct Frame {
     bool visible = false;
     std::shared_ptr<const Mesh> mesh;
@@ -49,6 +59,7 @@ struct Frame {
     float keepOut[4] = {};
     float keepOutAlpha = 0.18f; // how much of the gun shows in that box (0: none)
     heartbeat::Screen tracker;  // the heartbeat sensor's display (on the CV_VM_DRAW_TRACKER surface)
+    std::vector<FxQuad> fx;     // MW2's muzzle flash, drawn after the gun, in its order
 };
 
 void SetLog(LogFn log);

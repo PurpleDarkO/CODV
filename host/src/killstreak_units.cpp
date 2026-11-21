@@ -321,6 +321,7 @@ void Units::TickCrate(RuntimeBridge& runtime, Ped player, CvStreakView& view, st
     if (!crate_.landed) return;
     const bool atCrate = ksworld::Distance(Coords(player), c) <= ksrules::kCrateUseRange &&
                       Call<BOOL>(gta::IS_PED_ON_FOOT, player);
+    crate_.reach = atCrate;
     if (!atCrate) {
         crate_.holdSince = 0;
         return;

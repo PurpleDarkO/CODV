@@ -9,7 +9,7 @@ GTA is the world. Every MW2 asset is read from the player's own copy at setup ti
 | Area | What works |
 |---|---|
 | Movement | MW2's pmove drives the player in Story Mode (run, sprint, jump, crouch, prone, mantle) against GTA's live collision, vehicles, props and peds; CODV's slide, dive, auto vault, high climb and lean; GTA's ladders and parachute keep MW2's view and HUD |
-| Weapons | MW2's multiplayer weapons with their real fire rates, spread, kick, reloads, swaps and melee; weapon sets of three random guns per number key; MW2's frag; the Stinger and the Javelin lock on, with long-range missiles and a proximity fuse; shooting from a vehicle's seat |
+| Weapons | MW2's multiplayer weapons with their real fire rates, spread, kick, reloads, swaps and melee; weapon sets of three random guns per number key; MW2's frag; the Stinger and the Javelin lock on, with long-range missiles and a proximity fuse |
 | View and body | MW2's first-person view models with MW2's animation, bob and sway; MW2's character animation on the GTA ped in third person |
 | Sound | MW2's weapon, footstep and killstreak sounds inside GTA's audio engine |
 | HUD | MW2's compass, crosshair, scopes, weapon bar, hit marker, damage direction, grenade indicator, kill feedback, blood and score bar |
@@ -51,6 +51,16 @@ GTA is the world. Every MW2 asset is read from the player's own copy at setup ti
 | Weapons | The heartbeat sensor's screen shows the hostiles ahead |
 | Weapons | The underbarrel grenade launcher and shotgun, switched to and back with X (D-pad down) |
 | Weapons | Random guns come with random attachments |
+
+## In 0.5.0
+
+| Area | What came |
+|---|---|
+| Movement | A quiet walk on Caps Lock; doors swing open as you walk into them |
+| Vehicles | Hold F to get in; a vehicle is GTA's alone until you are out |
+| Weapons | MW2's own muzzle flash, lighting the world around you |
+| Story missions | GTA's shops work (hold E inside one); scripted spots and character switches are left to GTA until the player is settled; MW2 starts on the mission's weapon; killstreaks in missions as an option, the nuke included |
+| Menu | The version shows in the menu |
 
 ## Next
 

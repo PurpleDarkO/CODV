@@ -31,6 +31,8 @@ struct Input {
     float keepOut[4] = {};      // GTA's radar: a box of the screen the gun stays out of (vmrender::Frame)
     float keepOutAlpha = 0.18f; // how much of the gun shows there
     heartbeat::Screen tracker;  // the heartbeat sensor's display
+    bool muzzleFlash = true;    // MW2's muzzle flash on the gun (MuzzleFlash)
+    float muzzleFlashStrength = 1.0f; // its brightness (MuzzleFlashStrength; 1: MW2's own)
 };
 // Whether the gun shown last has a heartbeat sensor's screen (its display is wanted).
 bool TrackerShown();
@@ -66,6 +68,8 @@ struct HudResult {
 // Script thread, after cv_mw2_step: MW2's crosshair and scope (cv_mw2_hud) and
 // its HUD (cv_mw2_hud_draw) for the present callback (hud_render).
 HudResult UpdateHud(RuntimeBridge& runtime, const HudInput& in);
+// The lights MW2's muzzle flash casts this frame (after Update; GTA world metres): the script lights them.
+const std::vector<CvVmFxLight>& FlashLights();
 // One line for the debug overlay.
 std::string Status();
 } // namespace vmfeed

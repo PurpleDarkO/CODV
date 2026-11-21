@@ -5,6 +5,8 @@
 //   move     INPUT_MOVE_LR / UD (30, 31)     WASD / left stick    -> forward, right (-127..127)
 //   look     INPUT_LOOK_LR / UD (1, 2)       mouse / right stick  -> yaw, pitch (degrees)
 //   sprint   INPUT_SPRINT (21), held         Shift / A            -> SPRINT
+//   walk     INPUT_SPECIAL_ABILITY_PC (171), held   Caps Lock     -> forward, right at kWalkShare (a quiet
+//            walk, as Counter-Strike's; on a pad the stick pushed part of the way does the same)
 //   jump     INPUT_JUMP (22), held           Space / X            -> JUMP
 //   stance   INPUT_DUCK (36)                 Ctrl / L3: tap crouch, hold prone; while sprinting,
 //            the press crouches at once (CODV's slide) and a jump stands up out of the slide
@@ -41,6 +43,7 @@ struct Raw {
     float lookX = 0.0f, lookY = 0.0f;  // GTA normals: x right +, y down +
     bool mouse = true;                 // keyboard and mouse (else pad)
     bool sprint = false, jump = false, duck = false, ads = false, attack = false;
+    bool walk = false; // held: a walk instead of the run (sprint wins)
     bool reload = false, melee = false, frag = false, smoke = false; // smoke: the special grenade (T)
     bool nextWeapon = false; // a press this frame (an edge, not held)
     bool alternate = false;  // the underbarrel weapon and back: a press this frame (an edge)
@@ -59,6 +62,8 @@ struct Settings {
     bool padLean = true; // L3 + the left stick sideways leans (the runtime's CV_OPT_LEAN must be on)
 };
 
+// The walk (Caps Lock held): this much of the run (MW2's own walking scale, as aiming down the sights).
+inline constexpr float kWalkShare = 0.4f;
 // Holding duck this long goes prone (a tap crouches).
 inline constexpr float kProneHold = 0.35f;
 // Holding it this long through a slide dives.
@@ -92,8 +97,9 @@ public:
         const float whole = std::floor(total);
         msCarry_ = total - whole;
         in.msec = static_cast<std::uint32_t>(std::clamp(whole, 0.0f, 200.0f));
-        in.forward = Axis(-r.moveY);
-        in.right = Axis(r.moveX);
+        const float pace = r.walk && !r.sprint ? kWalkShare : 1.0f;
+        in.forward = Axis(-r.moveY * pace);
+        in.right = Axis(r.moveX * pace);
 
         float yaw = 0.0f, pitch = 0.0f; // yaw left +, pitch up +
         if (r.mouse) {

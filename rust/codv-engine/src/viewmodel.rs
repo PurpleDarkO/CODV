@@ -639,6 +639,16 @@ pub struct Mesh {
     pub draws: Vec<MeshDraw>,
 }
 
+/// Bone `b`'s parent in `m` (XModel parentList: an offset back from the bone; the roots have none).
+fn model_parent(m: &vm::Model, b: usize) -> Option<usize> {
+    let roots = m.num_root_bones as usize;
+    if b < roots {
+        return None;
+    }
+    let step = *m.parent_list.get(b - roots)? as usize;
+    b.checked_sub(step).filter(|_| step > 0)
+}
+
 /// Bones of `m` named in `hide` or below one that is (asset_game
 /// `bone_has_hidden_ancestor`), as part-bit words.
 fn hidden_words(m: &vm::Model, hide: &[String]) -> [u32; 6] {
@@ -646,14 +656,7 @@ fn hidden_words(m: &vm::Model, hide: &[String]) -> [u32; 6] {
     if hide.is_empty() {
         return words;
     }
-    let roots = m.num_root_bones as usize;
-    let parent = |b: usize| -> Option<usize> {
-        if b < roots {
-            return None;
-        }
-        let step = *m.parent_list.get(b - roots)? as usize;
-        b.checked_sub(step).filter(|_| step > 0)
-    };
+    let parent = |b: usize| model_parent(m, b);
     for b in 0..m.bone_names.len() {
         let mut cur = Some(b);
         while let Some(c) = cur {
@@ -982,6 +985,17 @@ impl Rig {
     /// Skinning matrices (bind model space to D3D view space, inches), one per
     /// bone, as 3x4 row-major (rows x, y, z: [m0 m1 m2 tx]).
     pub fn skin(&self) -> Vec<[f32; 12]> {
+        self.skin_with_tags(&[]).0
+    }
+
+    /// A bone of the rig by name (hands' first, then the gun's): a tag to place things on.
+    pub fn bone(&self, name: &str) -> Option<usize> {
+        self.dobj.find(name)
+    }
+
+    /// `skin`, plus where each of `tags` is (bone to view: D3D view axes, inches; the bone's own axes,
+    /// MW2's: x forward along a gun's barrel at tag_flash, y left, z up).
+    pub fn skin_with_tags(&self, tags: &[usize]) -> (Vec<[f32; 12]>, Vec<Mat4>) {
         let instances: Vec<AnimInstance<'_>> = self
             .controller
             .tree
@@ -1004,7 +1018,9 @@ impl Rig {
         // The rocket's extra bones: copies of the gun bones it follows, or (unloaded) None: collapsed
         // to a point, so nothing is drawn.
         let extra = self.rocket_bones.as_deref().unwrap_or(&[]);
-        skin.iter()
+        let placed = tags.iter().map(|&t| world.get(t).map_or(Mat4::ZERO, |w| eye * *w)).collect();
+        let skin = skin
+            .iter()
             .map(|m| Some(*m))
             .chain(extra.iter().map(|&b| self.rocket_shown.then(|| skin[b])))
             .map(|m| {
@@ -1016,7 +1032,8 @@ impl Rig {
                     c[3][2],
                 ]
             })
-            .collect()
+            .collect();
+        (skin, placed)
     }
 }
 

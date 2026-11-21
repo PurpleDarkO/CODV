@@ -16,10 +16,13 @@
 #include "menu.h"
 #include "surface_map.h"
 #include "juggernaut_rules.h"
+#include "lifecycle_rules.h"
 #include "equipment_rules.h"
 #include "tactical_rules.h"
 #include "tracer_rules.h"
 #include "heartbeat_rules.h"
+#include "mission_log_rules.h"
+#include "door_rules.h"
 #include "minimap_rules.h"
 #include "radar_box.h"
 #include "mw2_input.h"
@@ -78,8 +81,20 @@ static void ControlPolicy() {
     f.quickJump = true;
     s = controls::Suppressed(f);
     CHECK(Has(s, input::kSprint) && Has(s, input::kJump));
-    f.onFoot = false; // in a vehicle: GTA's controls
+    f.onFoot = false; // on the way into a vehicle: GTA's controls
     CHECK(controls::Suppressed(f).empty());
+    // In its seat nothing fires: GTA's drive-by and aim, the vehicle's own weapons, an aircraft's, the weapon
+    // changes; driving, the camera key and the way out stay GTA's. The camera is never the first-person one.
+    f.seated = true;
+    s = controls::Suppressed(f);
+    CHECK(Has(s, input::kAttack) && Has(s, input::kAim) && Has(s, controls::kVehAttack) && Has(s, controls::kVehAttack2));
+    CHECK(Has(s, controls::kVehAim) && Has(s, controls::kVehPassengerAttack) && Has(s, controls::kVehFlyAttack) && Has(s, controls::kVehFlyAttack2));
+    CHECK(Has(s, input::kThrowGrenade) && Has(s, controls::kVehSelectNextWeapon));
+    CHECK(Has(s, controls::kVehRadioWheel) && Has(s, controls::kVehNextRadio) && Has(s, controls::kVehPrevRadio)); // the radio stays off
+    CHECK(!Has(s, controls::kNextCamera) && !Has(s, controls::kEnterVehicle) && !Has(s, controls::kMoveLR) && !Has(s, 71) && !Has(s, 72));
+    f.modeOn = false; // mode off: the vehicle's weapons are GTA's
+    CHECK(controls::Suppressed(f).empty());
+    CHECK(controls::SeatView(4) == 1 && controls::SeatView(0) == 0 && controls::SeatView(1) == 1 && controls::SeatView(2) == 2);
     // MW2 movement: walking, looking, sprint, jump, aim, GTA's trigger and its enter key (F is MW2's knife;
     // CODV enters a vehicle on F held at it) are taken.
     f = controls::Frame{};
@@ -93,7 +108,58 @@ static void ControlPolicy() {
     CHECK(Has(s, ksrules::kActionSlotKey) && !Has(s, ksrules::kContext)); // 4 is action slot 4
     f.rewardHeld = true; // a killstreak waits: the D-pad's right (GTA's context) calls it in
     CHECK(Has(controls::Suppressed(f), ksrules::kContext));
+    f.prompt = true; // unless GTA asks for it (a shop's "press E")
+    CHECK(!Has(controls::Suppressed(f), ksrules::kContext));
+    f.prompt = false;
+    f.lean = true; // the lean is the keyboard's: a pad's D-pad right stays GTA's without a reward
     f.rewardHeld = false;
+    CHECK(!Has(controls::Suppressed(f), ksrules::kContext));
+    f.keyboard = true; // on the keyboard E leans right, but a shop's prompt has it back
+    CHECK(Has(controls::Suppressed(f), ksrules::kContext));
+    f.prompt = true;
+    CHECK(!Has(controls::Suppressed(f), ksrules::kContext));
+    f.prompt = f.lean = false;
+    f.rewardHeld = true; // the keyboard calls a reward in with 4: E stays GTA's
+    CHECK(!Has(controls::Suppressed(f), ksrules::kContext));
+    f.rewardHeld = f.keyboard = false;
+    // E held: GTA has the player (standing still) for its interactions until it gave it back, the player
+    // moved, nothing was offered (a prompt keeps it) or it took too long.
+    // MW2 finds no ground where a mission stands the player: two quick falls back to the same spot and GTA
+    // keeps the player until it walks off or a while has passed.
+    CHECK(controls::Bounces(0, 300, 0.1f) == 1 && controls::Bounces(1, 300, 0.1f) == controls::kBouncesToHold);
+    CHECK(controls::Bounces(1, 4000, 0.1f) == 0 && controls::Bounces(1, 300, 20.0f) == 0); // a real skydive
+    CHECK(!controls::FootingOver(1.0f, 1000) && controls::FootingOver(4.0f, 1000) && controls::FootingOver(0.0f, 6000));
+    // After a switch CODV waits for GTA to settle the player: not attached, not in the air, collision loaded,
+    // a second standing still; at most a few seconds.
+    {
+        unsigned still = 0;
+        lifecycle::SettleFacts f;
+        CHECK(lifecycle::Unsettled(f, 500, 500, still) && still == 500);
+        CHECK(!lifecycle::Unsettled(f, 500, 1000, still) && still == 1000);
+        f.attached = true;
+        CHECK(lifecycle::Unsettled(f, 500, 1500, still));
+        f.attached = false, f.moved = 1.0f;
+        CHECK(lifecycle::Unsettled(f, 500, 2000, still) && still == 0); // moving: GTA still placing him
+        f.collision = false, f.moved = 0.0f;
+        CHECK(lifecycle::Unsettled(f, 2000, 3000, still) && !lifecycle::Unsettled(f, 16, lifecycle::kSettleMaxMs, still));
+        f.collision = true, f.moved = 5.0f, f.inVehicle = true; // a helicopter flying on: nothing to wait for
+        CHECK(!lifecycle::Unsettled(f, 16, 100, still));
+    }
+    // A mission's weapon picks MW2's slot: a sniper the sniper, a launcher the launcher, a pistol the secondary.
+    CHECK(controls::SlotForGtaGroup(controls::kGroupSniper) == 3 && controls::SlotForGtaGroup(controls::kGroupHeavy) == 4);
+    CHECK(controls::SlotForGtaGroup(controls::kGroupPistol) == 2 && controls::SlotForGtaGroup(0x39D5C192u) == 0); // a rifle: kept
+    using controls::InteractEnd;
+    CHECK(controls::InShop(true, 10.0f, 20.0f, 1.0f) && !controls::InShop(false, 0.0f, 0.0f, 0.0f)); // inside, by its icon
+    CHECK(!controls::InShop(true, 25.0f, 25.0f, 0.0f) && !controls::InShop(true, 0.0f, 0.0f, 15.0f)); // too far, another floor
+    CHECK(controls::InteractOver(false, true, 0.0f, 0.0f, false, false, false) == InteractEnd::None);
+    CHECK(controls::InteractOver(true, false, 0.0f, 1.0f, false, true, true) == InteractEnd::None); // the shop's menu
+    CHECK(controls::InteractOver(true, true, 0.0f, 0.0f, true, false, false) == InteractEnd::GaveBack);
+    CHECK(controls::InteractOver(false, true, 0.0f, 1.0f, true, false, false) == InteractEnd::Moved); // a move key
+    CHECK(controls::InteractOver(false, true, 0.0f, 0.3f, true, false, false) == InteractEnd::None);  // a stick's drift
+    CHECK(controls::InteractOver(false, true, 3.0f, 0.0f, true, false, false) == InteractEnd::Moved); // pushed off
+    CHECK(controls::InteractOver(false, true, 1.0f, 0.0f, false, true, false) == InteractEnd::NothingOffered);
+    CHECK(controls::InteractOver(false, true, 1.0f, 0.0f, true, true, false) == InteractEnd::None); // a prompt on screen
+    CHECK(controls::InteractOver(false, true, 1.0f, 0.0f, true, true, true) == InteractEnd::TooLong);
     f.remote = true; // a killstreak's camera: its gun change, thermal and reload keys are ours
     s = controls::Suppressed(f);
     CHECK(Has(s, ksrules::kContext) && Has(s, input::kSelectWeapon) && Has(s, input::kWheelNext) && Has(s, input::kReload));
@@ -286,6 +352,13 @@ static void Mw2Input() {
     r.moveY = -1.0f, r.moveX = 1.0f;
     CvMoveInput in = frame(r);
     CHECK(in.forward == 127 && in.right == 127 && in.buttons == 0);
+    // Caps Lock held: a walk (part of the run, no button); sprint wins over it.
+    r.walk = true;
+    in = frame(r);
+    CHECK(in.forward > 40 && in.forward < 60 && in.right == in.forward && in.buttons == 0);
+    r.sprint = true;
+    in = frame(r);
+    CHECK(in.forward == 127 && (in.buttons & CV_MW2_SPRINT));
     Raw fr;
     fr.frag = true;
     CHECK(frame(fr).buttons == CV_MW2_FRAG);
@@ -628,6 +701,55 @@ static void HeartbeatRules() {
     CHECK(screen.Due(9001) && screen.Frame(9001, shown) == 0.0f && shown.empty());
 }
 
+static void MissionLogRules() {
+    using namespace missionlog;
+    Snapshot a, b;
+    CHECK(Changes(a, b).empty());
+    // The edges, named; ammo and health only in the full line.
+    b.mission = b.cutscene = true;
+    b.control = false;
+    b.ammo = 30, b.health = 150;
+    CHECK(Changes(a, b) == "mission started, cutscene on, control taken");
+    b = a;
+    b.character = kFranklin;
+    b.inVehicle = true, b.vehicle = 0xB779A091u;
+    b.weapon = 0x1B06D571u, b.wanted = 2, b.blocked = "cutscene";
+    CHECK(Changes(a, b) == "now Franklin, in vehicle B779A091, GTA weapon 00000000 -> 1B06D571, wanted 0 -> 2, hands off: cutscene");
+    CHECK(Changes(b, a).find("on foot") != std::string::npos && Changes(b, a).find("hands off: none") != std::string::npos);
+    // A checkpoint or a scripted move: a teleport; a step is not.
+    b = a;
+    b.pos[0] = kJump + 5.0f;
+    CHECK(Changes(a, b).find("teleported 35 m") != std::string::npos);
+    b.pos[0] = 2.0f;
+    CHECK(Changes(a, b).empty());
+    b.dead = true, b.codv = true;
+    CHECK(Changes(a, b) == "player dead, CODV on");
+    // The full line: who, where, with what.
+    Snapshot s;
+    s.character = kTrevor, s.mission = true, s.codv = true, s.blocked = "cutscene", s.health = 200;
+    const std::string line = Line(s);
+    CHECK(line.find("Trevor in a mission, CODV on (hands off: cutscene), health 200") == 0);
+    CHECK(std::string(CharacterName(9)) == "?");
+}
+
+static void DoorRules() {
+    using namespace doors;
+    // A door leaf: door-high, door-wide, thin (either horizontal axis); not a gate, a post or a wardrobe.
+    const float lo[3] = {0.0f, -0.05f, 0.0f}, leaf[3] = {0.95f, 0.05f, 2.1f}, turned[3] = {0.1f, 0.9f, 2.1f};
+    CHECK(DoorShaped(lo, leaf) && ThinAxis(lo, leaf) == 1);
+    const float lo0[3] = {0.0f, 0.0f, 0.0f};
+    CHECK(DoorShaped(lo0, turned) && ThinAxis(lo0, turned) == 0);
+    const float gate[3] = {4.0f, 0.1f, 2.5f}, post[3] = {0.2f, 0.2f, 2.5f}, wardrobe[3] = {1.0f, 0.6f, 2.0f}, low[3] = {1.0f, 0.1f, 1.0f};
+    CHECK(!DoorShaped(lo0, gate) && !DoorShaped(lo0, post) && !DoorShaped(lo0, wardrobe) && !DoorShaped(lo0, low));
+    // The game's locks hold; the rest open.
+    CHECK(Locked(1) && Locked(2) && Locked(4) && !Locked(0) && !Locked(3) && !Locked(-1));
+    // Opens near its plane over the leaf; not beside it or far off; away from the player.
+    CHECK(Opens(0.5f, 0.8f, 0.0f, 0.95f) && Opens(-0.3f, -1.0f, 0.0f, 0.95f) && !Opens(1.6f, 0.5f, 0.0f, 0.95f));
+    CHECK(!Opens(0.5f, 1.5f, 0.0f, 0.95f) && OpenRatio(0.5f) == -1.0f && OpenRatio(-0.5f) == 1.0f);
+    // It swings at kSwingPerSecond, never past where it goes.
+    CHECK(Near(Swing(0.0f, 1.0f, 100.0f), 0.3f) && Swing(0.9f, 1.0f, 500.0f) == 1.0f && Swing(-0.5f, 0.0f, 1000.0f) == 0.0f);
+}
+
 static void MinimapRules() {
     // The minimap's angle: whole degrees in 0..359 for any heading.
     CHECK(minimap::Angle(0.0f) == 0 && minimap::Angle(90.0f) == (minimap::kFlip ? 270 : 90));
@@ -669,6 +791,8 @@ int main() {
     TacticalRules();
     TracerRules();
     HeartbeatRules();
+    MissionLogRules();
+    DoorRules();
     MinimapRules();
     EquipmentRules();
     InputMap();

@@ -49,6 +49,8 @@ public:
     std::uint32_t BodyPose(std::vector<float>& bones);
     // MW2's base guns for the menu (ABI 7) and the grenades thrown.
     std::vector<CvWeaponInfo> Mw2Guns() const;
+    // One of them: its label as the HUD shows it (empty: no such gun).
+    std::string Mw2GunLabel(std::uint32_t index) const;
     std::uint32_t Mw2Grenades(std::vector<CvGrenade>& out);
     // MW2's crosshair and scope for this frame (false: none).
     bool Mw2Hud(float fovY, bool thirdPerson, CvMw2Hud& out);
@@ -76,8 +78,13 @@ public:
     bool AliasLevel(std::uint32_t handle, float level);
     bool WeaponNumbers(const char* name, CvWeaponNumbers& out) const;
     bool Refill();
+    // The MW2 player's supplies (CvSupply): a pack, a found-guns run's start, a gun or a grenade found; with
+    // CV_SUPPLY_GUNS the number of guns carried. 0: nothing taken, no MW2 gunner yet, or an older runtime.
+    std::uint32_t Supply(std::uint32_t kind);
     // ABI 10: the images the next view models and MW2's HUD draw with (any thread; slow: decodes models).
     std::vector<std::string> VmReadyImages() const;
+    // MW2's view muzzle flash of the last cv_mw2_step (empty with an older runtime).
+    void VmFx(std::vector<CvVmFxQuad>& quads, std::vector<CvVmFxLight>& lights) const;
     // ABI 10: the GTA weapons standing in for the loadout's guns.
     std::vector<std::uint32_t> ReadyHashes() const;
     // ABI 10: how the held MW2 weapon locks on (CV_LOCK_*).
@@ -132,7 +139,9 @@ private:
     CvAliasLevelFn aliasLevel_ = nullptr;      // optional
     CvMw2WeaponNumbersFn weaponNumbers_ = nullptr;
     CvMw2RefillFn refill_ = nullptr;
+    CvMw2SupplyFn supply_ = nullptr; // optional
     CvVmReadyImagesFn vmReadyImages_ = nullptr;
+    CvVmFxFn vmFx_ = nullptr; // optional
     CvMw2ReadyHashesFn readyHashes_ = nullptr;
     CvMw2LockKindFn lockKind_ = nullptr;
 };

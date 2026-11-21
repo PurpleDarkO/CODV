@@ -6,6 +6,73 @@ noted with each release: a host and a runtime only work together on the same ABI
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-21
+
+Runtime ABI 10, unchanged (the runtime's additions are optional options and requests). **Run the setup again**
+to install it: it now also imports MW2's muzzle flash effects, and writes the new options (your `CodVLegacy.ini`
+settings are kept).
+
+### Added
+- Walk: hold Caps Lock and MW2's player walks instead of running (40% of the run, MW2's own walking scale); on a
+  controller the stick pushed part of the way already does. At a walk (slower than 2.6 m/s, aiming down the
+  sights too) the steps make no sound. Under MW2's movement Caps Lock no longer triggers
+  GTA's special ability.
+- MW2's muzzle flash: every shot plays the gun's own view flash from MW2 (its `viewFlashEffect`, read from your
+  MW2 at setup) at the barrel's tip, with MW2's flares, star spikes, glow and smoke, its atlas animation and
+  blend, and the silencer's own smaller flash at the silencer's tip. Its light flashes on the world around you
+  through GTA's lights. Menu HUD, `MuzzleFlash` (on by default) and `MuzzleFlashStrength` (0.1 to 1.5; 1.0 is
+  MW2's own, 0.6 by default). Needs the MW2 import run again
+  (INSTALL.bat), which now also writes the effects (`viewmodels/fx`).
+- Next to a vehicle, hold F to get in (a tap is still the knife; before, the mode had to be switched off).
+- Doors open under MW2's movement: walk into one and it swings away from you (through GTA's door system), and
+  shuts again once you are past. They were walls before (GTA's doors swing when the ped's body pushes them; under
+  MW2 the ped is placed, not pushed), except the few the game registers. A door the game locked (a mission's)
+  stays shut and solid. The log names each door it opens.
+- GTA's shops under MW2's movement: in one (Ammu-Nation, clothes, barber, tattoo, masks: an interior with the
+  shop's radar icon near, or GTA's shop script running, as in a story mission that hides the icons), hold E a
+  moment (D-pad right on a controller) and GTA has the player (its camera and body; the ped stands still
+  meanwhile), so GTA offers its "press E" and a tap of E uses it. CODV takes the player back once GTA gives it
+  back (the shop closed), as soon as the player moves, or when nothing was offered within 2.5 s. Elsewhere E
+  held is only the lean. GTA offered none of them before: its scripts look for its own camera and a ped it
+  moves. Not at a care package (E held opens it), nor on a controller while a killstreak waits. The log notes
+  each hand-over.
+- Killstreaks in story missions, as an option (Killstreaks menu, `KillstreaksInMissions=1`; off by default): the
+  kills count and the killstreaks can be called in during a mission, as a real risk (a strike that kills the
+  mission's allies or targets fails it). The Tactical Nuke there too with `NukeInMissions=1` (off: it waits
+  for free roam). A death there ends the streak; a cutscene, a character switch or a fade ends the one
+  running.
+- The CODV menu shows the mod's version in its header's corner.
+- A mission log for debugging story missions: during a mission or a cutscene, `CodVLegacy.log` notes what changes
+  for the player as it happens (a cutscene, control taken and back, a screen fade, a character switch, a
+  checkpoint teleport, a weapon or vehicle the mission gives, the wanted level, CODV's state and why it keeps
+  its hands off), with a full line at the mission's start and every 30 s, and who killed the player. Free roam
+  stays quiet.
+
+### Fixed
+- Franklin's sniper nest in Three's Company: the mission holds him there (attached to a prop) behind GTA's own
+  scope, and CODV took him: he fell, GTA had him standing again, over and over, and MW2's gun and HUD showed
+  inside GTA's scope. A player held on foot by a mission (attached to something) is GTA's now; CODV takes him
+  back once the mission lets go. After a character switch, or the player placed far off at once, CODV also
+  waits for GTA to settle him (not in the air, the collision around him loaded, a second standing still; 8 s
+  at most). As a last resort, two quick falls back to the same spot leave the player to GTA until he walks
+  3 m off or 6 s have passed.
+- In a story mission MW2 starts on the slot matching the GTA weapon the mission gave (after a character switch
+  or a new weapon while CODV's hands were off): a sniper rifle on the sniper (3), a launcher on the launcher
+  (5), a pistol on the secondary (2); anything else keeps MW2's.
+- A death with the mode off (a failed story mission, say) showed MW2's "Round Over" once the mode came on, and
+  counted in the kill counter's deaths. A death counts now as a kill does: the mode on, and no story mission
+  unless killstreaks count there.
+- On a controller D-pad right (GTA's context action) is GTA's again under MW2's movement, unless a killstreak
+  waits to be called in; it was taken whenever the lean was on (the lean is the keyboard's).
+
+### Changed
+- A vehicle is GTA's alone: its camera, HUD, body and weapons from the walk to the door until you are out again
+  (MW2's player, gun and magazine wait for the way out). MW2's gun and HUD no longer stay on screen in the seat,
+  and GTA's first-person vehicle camera is no longer forced. MW2 takes the player back once GTA's exit
+  animation is over, the camera eases into the eye, and the gun comes on screen when it is there. Getting out
+  no longer starts a ladder try (it left MW2's gun and HUD frozen over GTA's exit animation for up to three
+  seconds), and the vehicle just left is solid again (the player walked through it).
+
 ## [0.4.0] - 2026-11-13
 
 Runtime ABI 10, unchanged (the runtime's additions are optional options, flags and requests). **Run the setup
@@ -229,7 +296,8 @@ First public release. Runtime ABI 10.
 - CODV's own missiles have no in-flight sound yet.
 - GTA V Enhanced and GTA Online are not supported.
 
-[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/PurpleDarkO/CODV/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/PurpleDarkO/CODV/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/PurpleDarkO/CODV/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/PurpleDarkO/CODV/compare/v0.2.0...v0.3.0

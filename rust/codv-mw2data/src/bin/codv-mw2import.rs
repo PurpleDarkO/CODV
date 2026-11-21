@@ -25,10 +25,11 @@ fn main() -> ExitCode {
     match codv_mw2data::import_viewmodels(mw2, &mut table, out) {
         Ok(v) => {
             println!(
-                "MW2 viewmodels: {} models, {} animations, {} images ({:.0} MB); {} camouflage models skipped",
+                "MW2 viewmodels: {} models, {} animations, {} images, {} muzzle flash effects ({:.0} MB); {} camouflage models skipped",
                 v.models,
                 v.anims,
                 v.images,
+                v.effects,
                 v.bytes as f64 / 1e6,
                 v.skipped_models
             );

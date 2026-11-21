@@ -146,8 +146,11 @@ Mw2Hud=1
 ; Killstreaks (F5c): MW2's killstreaks from your MW2. Only hostile kills count (police, military,
 ; anyone fighting you); civilians neither add nor reset. Dying or switching the mode off restarts
 ; the count; earned rewards wait until used (a death loses them unless KeepKillstreaksOnDeath=1,
-; MW2's rule). Use the top one with 4 (pad: D-pad right). Off in story missions, and they never
-; change your wanted level.
+; MW2's rule). Use the top one with 4 (pad: D-pad right). They never change your wanted level.
+; KillstreaksInMissions=1: killstreaks in story missions too (0, the default: off there). A real risk: a
+; strike or the EMP may kill or stop someone or something the mission needs, and fail it. A cutscene or a
+; character switch ends the one running. NukeInMissions=1: the Tactical Nuke there too (0, the default: it
+; waits for free roam; it kills the mission's people).
 ; AllKillstreaks=1 (CODV's default): every killstreak comes at its kill count in one life, from the UAV
 ; to the Tactical Nuke. 0: only the three picks below (MW2's rule).
 ; SpacedKillstreaks=1 (CODV's default): one reward per kill count, the gaps widening:
@@ -179,6 +182,11 @@ Mw2Blood=1
 ; ViewmodelLight: how the hands and gun are lit. 0 = fixed daylight, 1 = GTA's time of day,
 ; 2 = the light around you (how bright the picture is behind the gun, with the time of day; default).
 ViewmodelLight=2
+; MuzzleFlash: MW2's muzzle flash on every shot (each gun's own effect from your MW2, at its barrel) and its light
+; on what is around you. 0 = off.
+MuzzleFlash=1
+; MuzzleFlashStrength: how bright the muzzle flash and its light are, 0.1 to 1.5 (1.0 = MW2's own; default 0.6).
+MuzzleFlashStrength=0.6
 ; GunOverRadar: the hands and gun over GTA's minimap. 0 = drawn over it, 1 = a faint ghost under it (default),
 ; 2 = hidden under it.
 GunOverRadar=1
@@ -220,6 +228,8 @@ Killstreak2=4
 Killstreak3=7
 EmpKills=15
 KeepKillstreaksOnDeath=0
+KillstreaksInMissions=0
+NukeInMissions=0
 ; NukeKillsPlayer: the Tactical Nuke kills you too, with your vehicle (MW2's rule); 0, the default: CODV
 ; spares you.
 NukeKillsPlayer=0

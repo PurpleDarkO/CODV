@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <map>
 #include <memory>
 
@@ -56,6 +57,9 @@ bool Covered(IDXGISwapChain* sc, ULONGLONG now, ULONGLONG published) {
 
 std::map<std::uint32_t, std::shared_ptr<const vmrender::Mesh>> g_meshes;
 bool g_tracker = false; // script thread: the gun shown last has a heartbeat screen
+// MW2's muzzle flash of the last Update (script thread).
+std::vector<CvVmFxQuad> g_fxQuads;
+std::vector<CvVmFxLight> g_fxLights;
 // The script thread and the prewarm thread share the decoded images (null: missing or unreadable).
 SRWLOCK g_imageLock = SRWLOCK_INIT;
 std::map<std::string, std::shared_ptr<const dds::Texture>> g_images;
@@ -234,8 +238,36 @@ std::shared_ptr<const vmrender::Mesh> Mesh(RuntimeBridge& runtime, std::uint32_t
 }
 
 void Hide() {
+    g_fxLights.clear();
     Lock lock;
     g_frame.visible = false;
+    g_frame.fx.clear();
+}
+
+// MW2's colour (0..255, display encoded) as the linear colour the pass adds or blends.
+float Linear(std::uint8_t c) {
+    const float v = c / 255.0f;
+    return v <= 0.04045f ? v / 12.92f : std::pow((v + 0.055f) / 1.055f, 2.4f);
+}
+
+// The muzzle flash's sprites with their images (read ahead by the prewarm; else read now, once). `strength`
+// scales how much each shows: an added sprite's light, a blended one's cover (the smoke).
+std::vector<vmrender::FxQuad> FlashQuads(const std::vector<CvVmFxQuad>& in, float strength) {
+    std::vector<vmrender::FxQuad> out;
+    out.reserve(in.size());
+    for (const CvVmFxQuad& q : in) {
+        vmrender::FxQuad f;
+        std::memcpy(f.corners, q.corners, sizeof(f.corners));
+        std::memcpy(f.uv, q.uv, sizeof(f.uv));
+        for (int c = 0; c < 3; ++c) f.rgba[c] = Linear(q.rgba[c]);
+        f.rgba[3] = std::min(1.0f, q.rgba[3] / 255.0f * strength);
+        f.additive = (q.flags & CV_VM_FX_ADD) != 0;
+        std::size_t n = 0;
+        while (n < sizeof(q.image) && q.image[n]) ++n;
+        f.texture = Image(std::string(q.image, n));
+        if (f.texture) out.push_back(std::move(f));
+    }
+    return out;
 }
 
 void HideHud() {
@@ -329,6 +361,15 @@ float Update(RuntimeBridge& runtime, const Input& in) {
         g_frame.keepOutAlpha = in.keepOutAlpha;
         g_frame.tracker = in.tracker;
     }
+    // MW2's muzzle flash on the gun, and the light it casts into GTA's world.
+    g_fxQuads.clear();
+    g_fxLights.clear();
+    if (in.muzzleFlash) runtime.VmFx(g_fxQuads, g_fxLights);
+    {
+        std::vector<vmrender::FxQuad> fx = FlashQuads(g_fxQuads, in.muzzleFlashStrength);
+        Lock lock;
+        g_frame.fx = std::move(fx);
+    }
     g_tracker = mesh->tracker;
     char line[96];
     std::snprintf(line, sizeof(line), "viewmodel: mesh %u, %u bones, ads %.2f", f.mesh_id, f.bone_count, f.ads);
@@ -416,6 +457,8 @@ HudResult UpdateHud(RuntimeBridge& runtime, const HudInput& in) {
     }
     return result;
 }
+
+const std::vector<CvVmFxLight>& FlashLights() { return g_fxLights; }
 
 std::string Status() { return g_status; }
 } // namespace vmfeed

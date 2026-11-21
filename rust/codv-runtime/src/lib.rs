@@ -14,6 +14,7 @@ mod arms;
 mod audio;
 mod body;
 mod collision;
+mod flash;
 mod hud;
 mod killstreaks;
 mod movers;
@@ -59,6 +60,8 @@ pub const CV_OUT_JUMP: u32 = 1 << 4;
 pub const CV_OUT_CROUCH_CHANGED: u32 = 1 << 5;
 pub const CV_OUT_CROUCHED: u32 = 1 << 6;
 pub const CV_OUT_ACTIVE: u32 = 1 << 7;
+/// The gun in hand has a silencer (ABI 10 addition).
+pub const CV_OUT_SILENCED: u32 = 1 << 8;
 
 // CvHud::flags
 pub const CV_HUD_KILL: u32 = 1 << 0;
@@ -172,6 +175,27 @@ pub const CV_OPT_MW2_ATTACH_PRIMARY_1: u32 = 49;
 pub const CV_OPT_MW2_ATTACH_PRIMARY_2: u32 = 50;
 pub const CV_OPT_MW2_ATTACH_SECONDARY_1: u32 = 51;
 pub const CV_OPT_MW2_ATTACH_SECONDARY_2: u32 = 52;
+/// Scarce supplies (1): kills give no Scavenger pack whatever CV_OPT_SCAVENGER says; ammunition and guns come
+/// from what the host finds (cv_mw2_supply). 0, the default: as ever, and a found-guns run started with
+/// CV_SUPPLY_SCARCE ends (the loadout the options had set is back).
+pub const CV_OPT_SCARCE: u32 = 53;
+/// cv_mw2_supply kinds. PACK: a pack found (a magazine more for every carried gun and, when one is carried, a
+/// frag: MW2's Scavenger pickup with its icon). SCARCE: the start of a found-guns run (one random handgun
+/// with its magazine and one spare, no grenades; the loadout options wait until CV_OPT_SCARCE goes off).
+/// GUN_LIGHT, GUN_HEAVY: a gun found in such a run (a machine pistol, SMG or shotgun; an assault rifle, LMG or
+/// sniper rifle), one not carried yet: it is added to the guns behind its kind's key (a primary behind key 1,
+/// a secondary behind key 2, where the handgun starts; the key again goes round them). FRAG, TACTICAL: one more of the
+/// grenade in play. GUNS, PRIMARIES: ask how many guns (primaries) are carried. LAST_GUN: asks which gun was
+/// found last, as 1 + its menu index (cv_mw2_gun_info's; 0: none yet). The asking ones change nothing.
+pub const CV_SUPPLY_PACK: u32 = 0;
+pub const CV_SUPPLY_SCARCE: u32 = 1;
+pub const CV_SUPPLY_GUN_LIGHT: u32 = 2;
+pub const CV_SUPPLY_GUN_HEAVY: u32 = 3;
+pub const CV_SUPPLY_FRAG: u32 = 4;
+pub const CV_SUPPLY_TACTICAL: u32 = 5;
+pub const CV_SUPPLY_GUNS: u32 = 6;
+pub const CV_SUPPLY_PRIMARIES: u32 = 7;
+pub const CV_SUPPLY_LAST_GUN: u32 = 8;
 /// CODV's sprint refill (30% faster than MW2's: the meter was rarely full again).
 const SPRINT_RECHARGE: f32 = 1.3;
 /// CODV's default sprint speed scale: a little over MW2's 1.5.
@@ -344,6 +368,8 @@ struct Inner {
     streaks: killstreaks::Streaks,
     /// MW2's Scavenger on hostile kills (CV_OPT_SCAVENGER).
     scavenger: bool,
+    /// Scarce supplies (CV_OPT_SCARCE): no Scavenger pack on kills.
+    scarce: bool,
     /// Unused killstreaks survive a death (CV_OPT_KS_KEEP_ON_DEATH; off: lost).
     ks_keep_on_death: bool,
     /// MW2's jump height (CV_OPT_JUMP_HEIGHT), units.
@@ -570,6 +596,7 @@ pub unsafe extern "C" fn cv_create(info: *const CvCreateInfo) -> *mut c_void {
                 hit_alert_seen: (0, 0),
                 streaks,
                 scavenger: true,
+                scarce: false,
                 ks_keep_on_death: false,
                 jump_height: codv_engine::player::MW2_JUMP_HEIGHT,
                 sprint_seconds: codv_engine::player::MW2_SPRINT_SECONDS,
@@ -622,6 +649,15 @@ fn foley_gain(f: codv_engine::player::Foley) -> f32 {
         Foley::Land { .. } => 0.8,
         Foley::Mantle | Foley::Slide | Foley::Dive => 0.7,
     }
+}
+
+/// Slower than this (MW2 units a second: 2.6 m/s; the run is about 190, the walk 76) the player's steps make
+/// no sound.
+const QUIET_WALK_SPEED: f32 = 2.6 / METRES_PER_UNIT;
+
+/// Whether the player moves at a walk or slower (their horizontal speed).
+fn quiet_walk(velocity: [f32; 3]) -> bool {
+    velocity[0].hypot(velocity[1]) < QUIET_WALK_SPEED
 }
 
 /// MW2's aliases for a movement sound on `surface` (codv_mw2data::movement_sounds).
@@ -845,6 +881,16 @@ pub unsafe extern "C" fn cv_set_option(rt: *mut c_void, id: u32, value: f32) -> 
             CV_OPT_VERBOSE => inner.verbose = value != 0.0,
             CV_OPT_KILLSTREAKS => inner.streaks.enabled = value != 0.0,
             CV_OPT_SCAVENGER => inner.scavenger = value != 0.0,
+            CV_OPT_SCARCE => {
+                inner.scarce = value != 0.0;
+                if !inner.scarce && inner.arms.as_mut().is_some_and(|a| a.scarce_end()) {
+                    (rt.log)("mw2: found-guns run over: the loadout the options set is back");
+                    if let Some(vm) = inner.vm.as_mut() {
+                        vm.reset();
+                    }
+                    prewarm(&inner, &rt.audio);
+                }
+            }
             CV_OPT_KS_KEEP_ON_DEATH => inner.ks_keep_on_death = value != 0.0,
             CV_OPT_KS_ALL => {
                 let all = value != 0.0;
@@ -1402,8 +1448,13 @@ pub unsafe extern "C" fn cv_mw2_step(rt: *mut c_void, input: *const CvMoveInput,
                         a.play_field(g, "fire_sound_player");
                     }
                 }
-                // The player's movement sounds (MW2's footsteps, landings, gear rattle).
-                for f in foley.iter().filter(|_| inner.movement_sounds) {
+                // The player's movement sounds (MW2's footsteps, landings, gear rattle). At a walk (Caps Lock
+                // held, the stick part of the way, aiming down the sights) the steps make no sound.
+                let quiet = quiet_walk(st.player.ps.velocity);
+                for f in foley
+                    .iter()
+                    .filter(|f| inner.movement_sounds && !(quiet && matches!(f, codv_engine::player::Foley::Step(_))))
+                {
                     let surface = codv_mw2data::MOVEMENT_SURFACES[inner.surface];
                     let gain = foley_gain(*f);
                     for (alias, fallback) in foley_aliases(*f, surface).into_iter().zip(foley_aliases(*f, "concrete")) {
@@ -1579,6 +1630,101 @@ pub unsafe extern "C" fn cv_vm_frame(rt: *const c_void, out: *mut CvVmFrame, bon
             reserved: [0; 2],
         };
         1
+    })
+}
+
+/// CvVmFxQuad flags: the sprite is added to what is behind (its material blends ONE, ONE); else it is
+/// alpha-blended.
+pub const CV_VM_FX_ADD: u32 = 1;
+
+/// One sprite of MW2's view muzzle flash (ABI 10 addition): corners in the view model's space (as
+/// `cv_vm_frame`'s bones: D3D view axes, inches; bottom left, bottom right, top right, top left), its
+/// atlas cell (u0, v0, u1, v1), MW2's colour, CV_VM_FX_* and its colour map (a `viewmodels/images` stem).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct CvVmFxQuad {
+    pub corners: [[f32; 3]; 4],
+    pub uv: [f32; 4],
+    pub rgba: [u8; 4],
+    pub flags: u32,
+    pub image: [u8; 64],
+}
+
+impl Default for CvVmFxQuad {
+    fn default() -> Self {
+        CvVmFxQuad { corners: [[0.0; 3]; 4], uv: [0.0; 4], rgba: [0; 4], flags: 0, image: [0; 64] }
+    }
+}
+
+/// A light the muzzle flash casts: GTA world metres, colour 0..1, range (metres) and MW2's intensity.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CvVmFxLight {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+    pub range: f32,
+    pub intensity: f32,
+}
+
+/// MW2's view muzzle flash of the last `cv_mw2_step` (optional export, ABI 10 addition): up to `quad_cap`
+/// sprites into `quads` (their count into `quad_count`) and up to `light_cap` lights into `lights`.
+/// Returns the light count.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_vm_fx(
+    rt: *const c_void,
+    quads: *mut CvVmFxQuad,
+    quad_cap: u32,
+    quad_count: *mut u32,
+    lights: *mut CvVmFxLight,
+    light_cap: u32,
+) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        if let Some(n) = unsafe { quad_count.as_mut() } {
+            *n = 0;
+        }
+        let Ok(inner) = rt.inner.lock() else { return 0 };
+        let (Some(st), Some(vm)) = (inner.mw2.as_ref(), inner.vm.as_ref()) else { return 0 };
+        if inner.scoped {
+            return 0;
+        }
+        let (q, l) = vm.flash();
+        if !quads.is_null() && quad_cap > 0 {
+            let n = q.len().min(quad_cap as usize);
+            let dst = unsafe { std::slice::from_raw_parts_mut(quads, n) };
+            for (d, src) in dst.iter_mut().zip(&q) {
+                *d = CvVmFxQuad {
+                    corners: src.corners,
+                    uv: src.uv,
+                    rgba: src.rgba,
+                    flags: if src.additive { CV_VM_FX_ADD } else { 0 },
+                    image: [0; 64],
+                };
+                copy_str(&mut d.image, &src.image);
+            }
+            if let Some(c) = unsafe { quad_count.as_mut() } {
+                *c = n as u32;
+            }
+        }
+        if lights.is_null() || light_cap == 0 {
+            return 0;
+        }
+        let n = l.len().min(light_cap as usize);
+        let dst = unsafe { std::slice::from_raw_parts_mut(lights, n) };
+        let m = METRES_PER_UNIT as f64;
+        for (d, src) in dst.iter_mut().zip(&l) {
+            *d = CvVmFxLight {
+                position: [
+                    (st.frame[0] + src.position[0] as f64 * m) as f32,
+                    (st.frame[1] + src.position[1] as f64 * m) as f32,
+                    (src.position[2] as f64 * m) as f32,
+                ],
+                color: src.color,
+                range: src.radius * METRES_PER_UNIT,
+                intensity: src.intensity,
+            };
+        }
+        n as u32
     })
 }
 
@@ -2617,7 +2763,7 @@ pub unsafe extern "C" fn cv_killstreak_step(
             }
         }
         // MW2's Scavenger: each hostile kill tops up the guns and frags.
-        if inner.scavenger && input.hostile_kills > 0 && input.flags & CV_STREAK_ALLOWED != 0 {
+        if inner.scavenger && !inner.scarce && input.hostile_kills > 0 && input.flags & CV_STREAK_ALLOWED != 0 {
             let mut topped = false;
             for _ in 0..input.hostile_kills.min(8) {
                 topped |= inner.arms.as_mut().is_some_and(|a| a.scavenge());
@@ -3155,6 +3301,58 @@ pub unsafe extern "C" fn cv_mw2_refill(rt: *mut c_void) -> u32 {
     })
 }
 
+/// The MW2 player's supplies changed by the host (optional export, ABI 10 addition): `kind` one of CV_SUPPLY_*.
+/// Returns 1 when done (0: nothing was taken, no MW2 gunner yet, or an unknown kind); CV_SUPPLY_GUNS returns
+/// the number of guns carried.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn cv_mw2_supply(rt: *mut c_void, kind: u32) -> u32 {
+    guard(0, || {
+        let Some(rt) = (unsafe { runtime(rt) }) else { return 0 };
+        let Ok(mut guard) = rt.inner.lock() else { return 0 };
+        let inner = &mut *guard;
+        let Some(arms) = inner.arms.as_mut() else { return 0 };
+        match kind {
+            CV_SUPPLY_PACK => {
+                if !arms.scavenge() {
+                    return 0;
+                }
+                if let Some(h) = inner.mw2hud.as_mut() {
+                    h.scavenged();
+                }
+                1
+            }
+            CV_SUPPLY_SCARCE => {
+                match arms.scarce_start() {
+                    Some(name) => {
+                        (rt.log)(&format!("mw2: found-guns run: starts with {name}, a magazine and one spare"))
+                    }
+                    None => (rt.log)("mw2: found-guns run: no handgun imported, the carried guns cut down instead"),
+                }
+                if let Some(vm) = inner.vm.as_mut() {
+                    vm.reset();
+                }
+                prewarm(inner, &rt.audio);
+                1
+            }
+            CV_SUPPLY_GUN_LIGHT | CV_SUPPLY_GUN_HEAVY => {
+                let Some(name) = arms.find_gun(kind == CV_SUPPLY_GUN_HEAVY) else { return 0 };
+                (rt.log)(&format!("mw2: found-guns run: found {name}; carrying {}", arms.all_names().join(" / ")));
+                if let Some(vm) = inner.vm.as_mut() {
+                    vm.reset();
+                }
+                prewarm(inner, &rt.audio);
+                1
+            }
+            CV_SUPPLY_FRAG => u32::from(arms.find_frag()),
+            CV_SUPPLY_TACTICAL => u32::from(arms.find_tactical()),
+            CV_SUPPLY_GUNS => arms.guns_carried() as u32,
+            CV_SUPPLY_PRIMARIES => arms.primaries_carried() as u32,
+            CV_SUPPLY_LAST_GUN => arms.last_found().map_or(0, |i| i as u32 + 1),
+            _ => 0,
+        }
+    })
+}
+
 pub const CV_HUD_DAMAGE_STUN: u32 = 1;
 
 /// The player took damage from `from` (GTA world metres: the attacker or the
@@ -3275,7 +3473,10 @@ mod tests {
         assert_eq!(size_of::<CvVmMeshInfo>(), 32);
         assert_eq!(size_of::<CvVmVertex>(), 68);
         assert_eq!(offset_of!(CvVmVertex, bones), 48);
+        // The walk (40% of the 190 run) is quiet; the run, the crouched run and the sprint are not.
+        assert!(quiet_walk([76.0, 0.0, -300.0]) && !quiet_walk([190.0, 0.0, 0.0]) && !quiet_walk([90.0, 90.0, 0.0]));
         assert_eq!(size_of::<CvVmDraw>(), 144);
+        assert_eq!((size_of::<CvVmFxQuad>(), offset_of!(CvVmFxQuad, flags), size_of::<CvVmFxLight>()), (136, 68, 32));
     }
 
     /// A host world: flat ground whose top is at z = 10 m, everywhere.
@@ -4579,6 +4780,153 @@ mod tests {
                 let inner = (*(rt as *const Runtime)).inner.lock().unwrap();
                 assert_eq!(inner.arms.as_ref().unwrap().all_names().len(), 4, "four guns, one per key");
             }
+            // A found-guns run (scarce supplies): one random handgun with its magazine and one spare, no
+            // grenades; the loadout options wait.
+            // The options' loadout (weapon sets: its groups), and the guns carried one by one.
+            let groups = || {
+                let inner = (*(rt as *const Runtime)).inner.lock().unwrap();
+                inner.arms.as_ref().unwrap().all_names()
+            };
+            let names = || {
+                let inner = (*(rt as *const Runtime)).inner.lock().unwrap();
+                inner.arms.as_ref().unwrap().flat_names()
+            };
+            let base = |n: &str| arms::base_name(n).to_owned();
+            let before = (groups(), names());
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_GUN_LIGHT), 0, "no run: nothing to find");
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_FRAG), 0);
+            assert_eq!(cv_set_option(rt, CV_OPT_SCARCE, 1.0), 1);
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_SCARCE), 1);
+            let start = names();
+            assert_eq!(start.len(), 1, "{start:?}");
+            assert!(arms::MENU_GUNS[arms::MENU_HANDGUNS..].contains(&base(&start[0]).as_str()), "{start:?}");
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_GUNS), 1);
+            assert_eq!(cv_set_option(rt, CV_OPT_MW2_PRIMARY, 0.0), 1);
+            assert_eq!(cv_set_option(rt, CV_OPT_MW2_RANDOMIZE, 1.0), 0, "the options do not touch what was found");
+            assert_eq!(cv_set_option(rt, CV_OPT_AMMO_SCALE, 3.0), 1);
+            assert_eq!(names(), start);
+            mv.weapon_request = 0;
+            mv.buttons = 0;
+            let tick = || {
+                let (mut mo, mut out) = (mo, out);
+                cv_mw2_step(rt, &mv, &mut mo);
+                cv_step(rt, &input, &mut out);
+                out
+            };
+            let o = tick();
+            assert!(
+                o.mag_size > 0 && o.hud.mag == o.mag_size && o.hud.reserve == o.mag_size,
+                "{} {} {}",
+                o.hud.mag,
+                o.hud.reserve,
+                o.mag_size
+            );
+            // Grenades come one at a time, two frags at most.
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_FRAG), 1);
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_FRAG), 1);
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_FRAG), 0, "full");
+            // A pack: a magazine more.
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_PACK), 1);
+            let o = tick();
+            assert_eq!(o.hud.reserve, 2 * o.mag_size);
+            // A pause keeps what was found (no refill, nothing lost).
+            cv_reset(rt);
+            let o = tick();
+            assert_eq!((o.hud.mag, o.hud.reserve), (o.mag_size, 2 * o.mag_size));
+            // The handgun is the secondary: behind key 2, and key 1 has nothing yet.
+            let held = || {
+                let inner = (*(rt as *const Runtime)).inner.lock().unwrap();
+                let a = inner.arms.as_ref().unwrap();
+                a.arsenal.gun(a.gunner.as_ref().unwrap().held()).unwrap().name.clone()
+            };
+            let key = |k: u32| {
+                let mut mv = mv;
+                mv.weapon_request = 1 + k;
+                let (mut mo, mut out) = (mo, out);
+                cv_mw2_step(rt, &mv, &mut mo);
+                cv_step(rt, &input, &mut out);
+                // Long enough for the slowest gun to be put away and the next one raised.
+                for _ in 0..300 {
+                    tick();
+                }
+                held()
+            };
+            assert_eq!(key(1), start[0], "key 1: no primary yet");
+            assert_eq!(key(2), start[0]);
+            // A heavy gun is a primary: it goes behind key 1 and comes to hand; the handgun and its rounds stay
+            // behind key 2.
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_PRIMARIES), 0);
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_LAST_GUN), 0, "nothing found yet");
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_GUN_HEAVY), 1);
+            let two = names();
+            // The host names the find: the menu's gun with the same base.
+            let last = cv_mw2_supply(rt, CV_SUPPLY_LAST_GUN);
+            assert!(last > 0);
+            let mut w = CvWeaponInfo {
+                size: size_of::<CvWeaponInfo>() as u32,
+                gta_hash: 0,
+                mag: 0,
+                reserve: 0,
+                name: [0; 32],
+                label: [0; 32],
+            };
+            assert_eq!(cv_mw2_gun_info(rt, last - 1, &mut w), 1);
+            let menu_name = CStr::from_bytes_until_nul(&w.name).unwrap().to_string_lossy().into_owned();
+            assert_eq!(base(&menu_name), base(&two[0]), "{menu_name} {two:?}");
+            assert!(w.label[0] != 0, "a label to show");
+            assert_eq!(two.len(), 2, "{two:?}");
+            assert_eq!(two[1], start[0]);
+            assert!(arms::is_primary(&base(&two[0])), "{two:?}");
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_GUNS), 2);
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_PRIMARIES), 1);
+            for _ in 0..80 {
+                tick();
+            }
+            assert_eq!(held(), two[0], "the find comes to hand");
+            {
+                let inner = (*(rt as *const Runtime)).inner.lock().unwrap();
+                let a = inner.arms.as_ref().unwrap();
+                let g = a.gunner.as_ref().unwrap();
+                let (ammo, frags) = g.ammo_state();
+                assert_eq!(frags, 2, "the frags found stay");
+                let id = a.arsenal.id(&start[0]).unwrap();
+                let size = a.arsenal.gun(id).unwrap().facts.clip_size;
+                assert!(ammo.iter().any(|x| *x == (id, size, 2 * size)), "{ammo:?}");
+            }
+            assert_eq!(key(2), two[1], "key 2: the handgun");
+            assert_eq!(key(1), two[0], "key 1: the primary");
+            // Every find is added, nothing is given up: the primaries first (key 1), the secondaries after
+            // them (key 2), no gun twice.
+            let mut took = 0;
+            for k in 0..10 {
+                took += cv_mw2_supply(rt, if k % 2 == 0 { CV_SUPPLY_GUN_LIGHT } else { CV_SUPPLY_GUN_HEAVY });
+            }
+            assert_eq!(took, 10);
+            let all = names();
+            let primaries = cv_mw2_supply(rt, CV_SUPPLY_PRIMARIES) as usize;
+            assert_eq!(all.len(), 12, "{all:?}");
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_GUNS), 12);
+            assert!(primaries >= 6 && all[..primaries].iter().all(|n| arms::is_primary(&base(n))), "{all:?}");
+            assert!(all[primaries..].iter().all(|n| !arms::is_primary(&base(n))), "{all:?}");
+            assert!(all.contains(&two[0]) && all.contains(&start[0]), "{all:?}");
+            let mut bases: Vec<String> = all.iter().map(|n| base(n)).collect();
+            bases.sort();
+            bases.dedup();
+            assert_eq!(bases.len(), all.len(), "{all:?}");
+            // The key again goes round the guns behind it.
+            let mut ones = vec![key(1), key(1), key(1)];
+            assert!(ones.iter().all(|n| all[..primaries].contains(n)), "{ones:?}");
+            ones.dedup();
+            assert_eq!(ones.len(), 3, "{ones:?}");
+            if all.len() - primaries >= 2 {
+                let (a, b) = (key(2), key(2));
+                assert!(a != b && all[primaries..].contains(&a) && all[primaries..].contains(&b), "{a} {b}");
+            }
+            // The run over: the loadout the options had set is back, and guns are no longer found.
+            assert_eq!(cv_set_option(rt, CV_OPT_SCARCE, 0.0), 1);
+            assert_eq!((groups(), names()), before);
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_GUN_HEAVY), 0);
+            assert_eq!(cv_mw2_supply(rt, CV_SUPPLY_LAST_GUN), 0, "no run: no find");
             cv_destroy(rt);
         }
         let _ = std::fs::remove_dir_all(&root);

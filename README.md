@@ -57,6 +57,7 @@ menu) hands everything back to GTA. Each switch-on brings new random MW2 guns (b
 | Fire | Left mouse | RT |
 | Aim down sights | Right mouse | LT |
 | Sprint | Shift | A |
+| Walk (quiet) | Caps Lock (hold) | Left stick part of the way |
 | Reload | R | B |
 | Next weapon | Tab or mouse wheel | LB |
 | Knife | F | R3 |
@@ -67,13 +68,17 @@ menu) hands everything back to GTA. Each switch-on brings new random MW2 guns (b
 | Weapon groups: primaries / secondaries / snipers / launchers (again: the group's next gun) | 1 / 2 / 3 / 5 | |
 | Killstreak | 4 | D-pad right |
 | Lean left / right (hold) | Q / E | |
+| In a shop (Ammu-Nation, clothes, barber, tattoo, masks): GTA has you, then its "press E" | hold E, then E | hold D-pad right, then D-pad right |
 | Take a ladder | walk into it | Y |
 | Third-person camera (`ThirdPersonKey=1`; off by default) | C | Back |
 | CODV menu | + (or numpad +; `MenuKey`) | Back + LB |
 
-These are GTA's own control actions, so your GTA key bindings carry over. While CODV drives you, F is only the
-knife: switch the mode off to get into a vehicle (on a controller, Y still enters the vehicle you look at, and you
-can shoot from the seat with MW2's HUD and gun).
+These are GTA's own control actions, so your GTA key bindings carry over. While CODV drives you, F is the knife
+and E leans right. GTA offers a shop's "press E" only to its own player, so in a shop hold E a moment where you
+stand: GTA has you (its camera and body, standing still), its prompt shows and E is GTA's; move, or leave the
+shop, and CODV takes you back. Outside the shops E held is only the lean. Next to a vehicle a tap of F is still the knife and holding F gets into the vehicle you look at (on a
+controller, Y enters it). A vehicle is GTA's alone: its camera, HUD and weapons until you get out, when MW2's gun
+and HUD come back.
 
 ## Features
 
@@ -95,6 +100,8 @@ crossing the sky come down (`Mw2Missiles`). The RPG-7, the AT4 and the Thumper f
 MW2's attachments go on the guns (menu Weapons; random guns come with random ones): sights, silencer, FMJ,
 extended mags, the heartbeat sensor (its screen shows the hostiles ahead) and the underbarrel grenade launcher or
 shotgun, which X (D-pad down) switches to and back, with MW2's animations and their own rounds.
+Every shot shows MW2's own muzzle flash for that gun (its flares, sparks and smoke; a silencer's is smaller) and
+lights up what is around you (`MuzzleFlash`, its brightness `MuzzleFlashStrength`).
 
 **Explosives.** G (RB) throws what you pick in the menu (`Lethal`), with MW2's own animation and HUD icon:
 the frag; the Semtex, which sticks to whatever it hits, a car or a person included, and goes off two seconds
@@ -134,8 +141,11 @@ The streak counts per life, and rewards you have not used are lost when you die 
 keeps them). The Tactical Nuke ends the run: its blast's kills count, then the streak starts over from zero and the
 rewards still held are cleared (nothing else can be called in while it is inbound). Each nuke also starts a new round: the score bar shows
 "Round N", one more after every nuke. "Spaced kill counts" off in the menu uses MW2's own counts (UAV 3 to Nuke 25); "All killstreaks" off
-uses MW2's rule of three picks (`Killstreak1..3`). Killstreaks stay off in story missions and never change your
-wanted level.
+uses MW2's rule of three picks (`Killstreak1..3`). Killstreaks never change your wanted level. In story missions
+they stay off unless "Killstreaks in story missions" is on (`KillstreaksInMissions=1`): then they count and can be
+called in there too, as a real risk: a strike or the EMP may kill someone the mission needs and fail it. The
+Tactical Nuke waits for free roam unless `NukeInMissions=1` ("Tactical Nuke in story missions too"). A cutscene
+or a character switch ends the one running.
 
 **Police Juggernauts.** In Free Roam, at four stars a Juggernaut may join the police hunting you, and at five
 up to three, minutes apart (the next at least 1:30 to 2:30 after one joins, 45 s to 1:45 after one dies; none while the stars flash): heavy armour, a heavy machine gun, much more health, no head shot kill and a slow, steady advance

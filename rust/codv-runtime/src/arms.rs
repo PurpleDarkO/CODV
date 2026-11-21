@@ -7,7 +7,8 @@
 //! the interim gunplay.
 use crate::{CV_HIT_HEAD, CV_HIT_PED, CV_MAX_SHOTS, copy_str};
 use crate::{
-    CV_HUD_HEADSHOT, CV_HUD_KILL, CV_OUT_ACTIVE, CV_OUT_EQUIP, CV_OUT_MELEE, CV_OUT_RELOAD, CvHit, CvOutput, CvShot,
+    CV_HUD_HEADSHOT, CV_HUD_KILL, CV_OUT_ACTIVE, CV_OUT_EQUIP, CV_OUT_MELEE, CV_OUT_RELOAD, CV_OUT_SILENCED, CvHit,
+    CvOutput, CvShot,
 };
 use codv_core::json::{self, Value};
 use codv_engine::arms::{Arsenal, Gun, GunFrame, Gunner};
@@ -151,6 +152,36 @@ pub const MENU_PRIMARIES: usize = 23;
 /// Where MW2's sniper rifles start in MENU_GUNS (cheytac .. m21): the third slot's pool; the
 /// random primary comes from the guns before them (assault rifles, SMGs, LMGs).
 pub const MENU_SNIPERS: usize = 19;
+/// Where MW2's machine pistols and handguns start in MENU_GUNS (the shotguns come before them, from
+/// MENU_PRIMARIES on). The machine pistols' start only the tests check (the pools need no split there).
+#[cfg(test)]
+pub const MENU_MACHINE_PISTOLS: usize = 29;
+pub const MENU_HANDGUNS: usize = 33;
+/// Where the SMGs and the LMGs start (the assault rifles come first).
+const MENU_SMGS: usize = 9;
+const MENU_LMGS: usize = 14;
+/// The most frags a found-guns run carries.
+pub const FOUND_FRAGS: i32 = 2;
+
+/// Whether a MENU_GUNS base name is one of MW2's primaries (key 1: assault rifles, SMGs, LMGs, sniper rifles);
+/// the others are secondaries (key 2: shotguns, machine pistols, handguns).
+pub fn is_primary(base: &str) -> bool {
+    MENU_GUNS.iter().position(|&b| b == base).is_some_and(|i| i < MENU_PRIMARIES)
+}
+
+/// A found-guns run (CV_SUPPLY_SCARCE until CV_OPT_SCARCE goes off): the loadout is what the player found, not
+/// what the options ask for. Holds what the options had set, put back when the run ends, and the grenades
+/// carried across a pause.
+struct Found {
+    loadout: Vec<u32>,
+    sets: bool,
+    set_len: [usize; SETS],
+    frags: i32,
+    tacticals: i32,
+    /// The last gun found (its base, as the menu has it), for the host's notice.
+    last: Option<u32>,
+}
+
 /// MW2's launchers (RPG-7, AT4, Stinger, Javelin, Thumper): the fourth slot's pool (key 5).
 pub const MENU_LAUNCHERS: &[&str] = &["rpg", "at4", "stinger", "javelin", "m79"];
 /// CODV's weapon sets (CV_OPT_WEAPON_SETS): up to this many guns behind each number key.
@@ -291,6 +322,8 @@ pub struct Arms {
     headshot: bool,
     /// One line about what was loaded (the menu's status).
     pub summary: String,
+    /// A found-guns run is on (scarce_start .. scarce_end).
+    found: Option<Found>,
 }
 
 impl Arms {
@@ -422,18 +455,35 @@ impl Arms {
             kill: false,
             headshot: false,
             summary,
+            found: None,
         })
     }
 
     /// The gunner, created with the loadout the first time it is needed.
     pub fn gunner(&mut self) -> &mut Gunner {
         if self.gunner.is_none() {
-            let mut g = Gunner::new(&self.arsenal, &self.loadout)
-                .with_reserve_scale(&self.arsenal, self.ammo_scale)
-                .with_frags(&self.arsenal, self.lethal_name(), self.frags)
-                .with_tacticals(&self.arsenal, self.tactical_name(), TACTICAL_COUNT);
+            let mut g = Gunner::new(&self.arsenal, &self.loadout).with_reserve_scale(&self.arsenal, self.ammo_scale);
+            let kept = self.kept.take();
+            g = match self.found.as_ref() {
+                // A found-guns run: only what was found. Anew (a new life), each gun has its magazine and one
+                // spare and there are no grenades.
+                Some(f) => {
+                    let (frags, tacticals) = if kept.is_some() { (f.frags, f.tacticals) } else { (0, 0) };
+                    g.scarce(&self.arsenal);
+                    g.with_frags(&self.arsenal, self.lethal_name(), frags).with_tacticals(
+                        &self.arsenal,
+                        self.tactical_name(),
+                        tacticals,
+                    )
+                }
+                None => g.with_frags(&self.arsenal, self.lethal_name(), self.frags).with_tacticals(
+                    &self.arsenal,
+                    self.tactical_name(),
+                    TACTICAL_COUNT,
+                ),
+            };
             // Back after a pause, a menu or a cutscene: the rounds the player had.
-            if let Some((ammo, frags)) = self.kept.take() {
+            if let Some((ammo, frags)) = kept {
                 g.restore_ammo(&ammo, frags);
             }
             self.gunner = Some(g);
@@ -505,6 +555,12 @@ impl Arms {
         }
     }
 
+    /// Every gun of the loadout by name, in order (tests).
+    #[cfg(test)]
+    pub fn flat_names(&self) -> Vec<String> {
+        self.loadout.iter().filter_map(|&id| self.arsenal.gun(id)).map(|g| g.name.clone()).collect()
+    }
+
     /// The gun last asked for by name (weapon sets' tests).
     #[cfg(test)]
     pub fn selected_name(&self) -> String {
@@ -549,7 +605,7 @@ impl Arms {
 
     /// Weapon sets on or off: a new random loadout in the layout asked for (names, as randomize).
     pub fn set_sets(&mut self, on: bool) -> Option<Vec<String>> {
-        if self.sets == on {
+        if self.sets == on || self.found.is_some() {
             return None;
         }
         self.sets = on;
@@ -628,6 +684,11 @@ impl Arms {
         if slot > 1 || which > 1 || value > ATTACHMENTS.len() {
             return None;
         }
+        if self.found.is_some() {
+            // A found-guns run: a gun comes as it was found.
+            let id = *self.loadout.first()?;
+            return self.arsenal.gun(id).map(|g| g.name.clone());
+        }
         let at = if self.sets { self.set_start(slot) } else { slot };
         if self.attach[slot][which] == value {
             // Unchanged (the options applied again): the gun keeps what it has, a random gun its random
@@ -676,6 +737,9 @@ impl Arms {
     }
 
     pub fn set_slot(&mut self, slot: usize, index: usize) -> bool {
+        if self.found.is_some() {
+            return true; // a found-guns run: the guns are the ones found
+        }
         let Some(&id) = self.menu.get(index) else { return false };
         let id = if slot < 2 { self.dressed(slot, id) } else { id };
         if self.sets {
@@ -711,6 +775,9 @@ impl Arms {
     /// rifle for slot 3 and a random launcher for slot 4 from the player's MW2,
     /// not the same set as now; a fresh loadout. Returns the names.
     pub fn randomize(&mut self) -> Option<Vec<String>> {
+        if self.found.is_some() {
+            return None; // a found-guns run: the guns are the ones found
+        }
         let pool = |range: std::ops::Range<usize>| -> Vec<u32> {
             MENU_GUNS[range].iter().filter_map(|b| self.arsenal.id(&format!("{b}_mp"))).collect()
         };
@@ -853,7 +920,9 @@ impl Arms {
         };
         self.tactical = index;
         if let Some(g) = self.gunner.take() {
-            self.gunner = Some(g.with_tacticals(&self.arsenal, name, TACTICAL_COUNT));
+            // A found-guns run: as many as were found, no more.
+            let count = if self.found.is_some() { g.tacticals().1 } else { TACTICAL_COUNT };
+            self.gunner = Some(g.with_tacticals(&self.arsenal, name, count));
         }
         true
     }
@@ -867,7 +936,8 @@ impl Arms {
         }
         self.lethal = index;
         if let Some(g) = self.gunner.take() {
-            self.gunner = Some(g.with_frags(&self.arsenal, name, self.frags));
+            let count = if self.found.is_some() { g.frags() } else { self.frags };
+            self.gunner = Some(g.with_frags(&self.arsenal, name, count));
         }
         true
     }
@@ -880,7 +950,11 @@ impl Arms {
         if let Some(f) = frags {
             self.frags = f.clamp(0, 20);
         }
-        // Applied at once: the carried guns get the new reserve, the frags their count.
+        // Applied at once: the carried guns get the new reserve, the frags their count (not in a found-guns
+        // run: nothing is given there).
+        if self.found.is_some() {
+            return;
+        }
         if let Some(g) = self.gunner.take() {
             let held = g.loadout().to_vec();
             if held == self.loadout {
@@ -921,6 +995,168 @@ impl Arms {
         true
     }
 
+    /// The pool of MENU_GUNS `range` the player's MW2 has.
+    fn menu_pool(&self, range: std::ops::Range<usize>) -> Vec<u32> {
+        MENU_GUNS[range].iter().filter_map(|b| self.arsenal.id(&format!("{b}_mp"))).collect()
+    }
+
+    /// The start of a found-guns run (CV_SUPPLY_SCARCE): one handgun picked at random (with its random
+    /// attachments, as a random loadout's), its magazine and one spare, no grenades; the knife as ever. What
+    /// the options had set waits for scarce_end. Its name; None when the player's MW2 has no handgun (then
+    /// the carried guns are only cut down to a magazine and one spare each).
+    pub fn scarce_start(&mut self) -> Option<String> {
+        let handguns = self.menu_pool(MENU_HANDGUNS..MENU_GUNS.len());
+        if handguns.is_empty() {
+            if let Some(g) = self.gunner.as_mut() {
+                g.scarce(&self.arsenal);
+            }
+            return None;
+        }
+        if self.found.is_none() {
+            self.found = Some(Found {
+                loadout: self.loadout.clone(),
+                sets: self.sets,
+                set_len: self.set_len,
+                frags: 0,
+                tacticals: 0,
+                last: None,
+            });
+        }
+        if let Some(f) = self.found.as_mut() {
+            f.frags = 0;
+            f.tacticals = 0;
+            f.last = None;
+        }
+        // The guns found gather behind MW2's keys as weapon sets do: the primaries behind key 1 (none yet),
+        // the secondaries behind key 2 (the handgun); the key again goes to the next one behind it.
+        self.sets = true;
+        self.set_len = [0; SETS];
+        self.set_len[1] = 1;
+        let gun = pick(&mut self.rng, &handguns);
+        let gun = self.random_dress(gun);
+        self.loadout = vec![gun];
+        self.fresh();
+        self.arsenal.gun(gun).map(|g| g.name.clone())
+    }
+
+    /// The end of a found-guns run: the loadout the options had set, anew.
+    pub fn scarce_end(&mut self) -> bool {
+        let Some(f) = self.found.take() else { return false };
+        self.loadout = f.loadout;
+        self.sets = f.sets;
+        self.set_len = f.set_len;
+        self.fresh();
+        true
+    }
+
+    /// How many guns are carried.
+    pub fn guns_carried(&self) -> usize {
+        self.loadout.len()
+    }
+
+    /// How many primaries a found-guns run carries (the guns behind key 1); 0 outside a run.
+    pub fn primaries_carried(&self) -> usize {
+        if self.found.is_some() { self.set_len[0] } else { 0 }
+    }
+
+    /// A gun found in a found-guns run: a light one (machine pistol, SMG, shotgun) or a heavy one (assault
+    /// rifle, LMG, sniper rifle), picked at random among the ones not carried yet, with its random
+    /// attachments, its magazine and one spare. It is added to the ones behind its kind's key, as MW2 keeps
+    /// them: a primary (assault rifle, SMG, LMG, sniper rifle) behind key 1, a secondary (shotgun, machine
+    /// pistol, handgun) behind key 2; nothing is given up, and the rounds of the guns carried stay. It comes
+    /// to hand. Its name; None when nothing was taken (no run, no such gun in the player's MW2, or every one
+    /// of that kind carried already).
+    pub fn find_gun(&mut self, heavy: bool) -> Option<String> {
+        self.found.as_ref()?;
+        let name_of = |arms: &Arms, id: u32| arms.arsenal.gun(id).map(|g| base_name(&g.name).to_owned());
+        let carried: Vec<String> = self.loadout.iter().filter_map(|&id| name_of(self, id)).collect();
+        let pool: Vec<u32> = if heavy {
+            self.menu_pool(0..MENU_SMGS).into_iter().chain(self.menu_pool(MENU_LMGS..MENU_PRIMARIES)).collect()
+        } else {
+            self.menu_pool(MENU_SMGS..MENU_LMGS)
+                .into_iter()
+                .chain(self.menu_pool(MENU_PRIMARIES..MENU_HANDGUNS))
+                .collect()
+        };
+        let pool: Vec<u32> =
+            pool.into_iter().filter(|&id| name_of(self, id).is_some_and(|b| !carried.contains(&b))).collect();
+        if pool.is_empty() {
+            return None;
+        }
+        let gun = pick(&mut self.rng, &pool);
+        let found = gun;
+        // Where it goes: after the primaries carried, or after everything (the secondaries are last).
+        let group = if is_primary(&name_of(self, gun)?) { 0 } else { 1 };
+        let slot = if group == 0 { self.set_len[0] } else { self.loadout.len() };
+        let gun = self.random_dress(gun);
+        // What the player has now goes on with the guns kept.
+        let (ammo, frags, tacticals) = match (self.gunner.as_ref(), self.kept.take()) {
+            (Some(g), _) => {
+                let (ammo, frags) = g.ammo_state();
+                (ammo, frags, g.tacticals().1)
+            }
+            (None, Some((ammo, frags))) => (ammo, frags, self.found.as_ref().map_or(0, |f| f.tacticals)),
+            (None, None) => (Vec::new(), 0, 0),
+        };
+        self.loadout.insert(slot.min(self.loadout.len()), gun);
+        self.set_len[group] += 1;
+        let mut g = Gunner::new(&self.arsenal, &self.loadout).with_reserve_scale(&self.arsenal, self.ammo_scale);
+        g.scarce(&self.arsenal);
+        g = g.with_frags(&self.arsenal, self.lethal_name(), frags).with_tacticals(
+            &self.arsenal,
+            self.tactical_name(),
+            tacticals,
+        );
+        // The rounds of the guns carried (not the find's own: it comes with its magazine and one spare).
+        let kept: Vec<(u32, i32, i32)> = ammo.into_iter().filter(|a| a.0 != gun).collect();
+        g.restore_ammo(&kept, frags);
+        g.select(slot);
+        self.gunner = Some(g);
+        self.hand = Hand::Gun;
+        self.last = None;
+        self.equipped = 0;
+        self.selected = slot;
+        self.set_last = [0; SETS];
+        self.set_last[group] = slot - self.set_start(group);
+        if let Some(f) = self.found.as_mut() {
+            f.last = Some(found);
+        }
+        self.arsenal.gun(gun).map(|g| g.name.clone())
+    }
+
+    /// The menu index (cv_mw2_gun_info's) of the last gun found in this found-guns run; None before the first
+    /// one, or outside a run.
+    pub fn last_found(&self) -> Option<usize> {
+        let id = self.found.as_ref()?.last?;
+        self.menu.iter().position(|&m| m == id)
+    }
+
+    /// A frag (the lethal in play) found in a found-guns run: one more, FOUND_FRAGS at most. False when
+    /// nothing was taken (no run, no gunner yet, already full).
+    pub fn find_frag(&mut self) -> bool {
+        if self.found.is_none() {
+            return false;
+        }
+        let Some(g) = self.gunner.take() else { return false };
+        let had = g.frags();
+        let name = self.lethal_name();
+        self.gunner = Some(g.with_frags(&self.arsenal, name, (had + 1).min(FOUND_FRAGS)));
+        had < FOUND_FRAGS
+    }
+
+    /// A special grenade (the one in play) found in a found-guns run: one more, TACTICAL_COUNT at most. False
+    /// when nothing was taken (no run, none in play, no gunner yet, already full).
+    pub fn find_tactical(&mut self) -> bool {
+        let name = self.tactical_name();
+        if self.found.is_none() || self.arsenal.offhand_id(name).is_none() {
+            return false;
+        }
+        let Some(g) = self.gunner.take() else { return false };
+        let had = g.tacticals().1;
+        self.gunner = Some(g.with_tacticals(&self.arsenal, name, (had + 1).min(TACTICAL_COUNT)));
+        had < TACTICAL_COUNT
+    }
+
     /// An imported weapon row by name (the killstreaks' guns: "ac130_105mm_mp").
     pub fn find_row(&self, name: &str) -> Option<&codv_mw2data::table::Row> {
         self.table.weapons.iter().find(|r| r.name.eq_ignore_ascii_case(name))
@@ -934,8 +1170,15 @@ impl Arms {
             && g.loadout() == self.loadout.as_slice()
         {
             self.kept = Some(g.ammo_state());
+            if let Some(f) = self.found.as_mut() {
+                f.frags = g.frags();
+                f.tacticals = g.tacticals().1;
+            }
         }
+        // A found-guns run: what was found stays found across a pause, a menu or a vehicle.
+        let kept = if self.found.is_some() { self.kept.take() } else { None };
         self.fresh();
+        self.kept = kept;
     }
 
     /// A new loadout (or a new life): full ammo.
@@ -973,6 +1216,10 @@ impl Arms {
         }
         if f.melee_started {
             out.flags |= CV_OUT_MELEE;
+        }
+        // MW2's silenced variants are named for it ("m4_silencer_mp", "m4_acog_silencer_mp").
+        if self.hand == Hand::Gun && self.arsenal.gun(f.weapon).is_some_and(|g| g.name.contains("silencer")) {
+            out.flags |= CV_OUT_SILENCED;
         }
         let gta = self.gta_hash(f.weapon);
         if gta != 0 && gta != self.equipped {
@@ -1102,6 +1349,19 @@ mod tests {
         }
         assert_eq!(pick_variant(&mut rng, &[(9, 0)]), Some(9));
         assert_eq!(pick_variant(&mut rng, &[]), None);
+    }
+
+    #[test]
+    fn found_guns_go_behind_their_kinds_key() {
+        assert_eq!(MENU_GUNS[MENU_SMGS], "mp5k");
+        assert_eq!(MENU_GUNS[MENU_LMGS], "sa80");
+        assert_eq!(MENU_GUNS[MENU_SNIPERS], "cheytac");
+        assert_eq!(MENU_GUNS[MENU_PRIMARIES], "spas12");
+        assert_eq!(MENU_GUNS[MENU_MACHINE_PISTOLS], "pp2000");
+        assert_eq!(MENU_GUNS[MENU_HANDGUNS], "usp");
+        // Key 1 the primaries, key 2 the secondaries, as MW2 has them.
+        assert!(is_primary("m4") && is_primary("uzi") && is_primary("m240") && is_primary("barrett"));
+        assert!(!is_primary("spas12") && !is_primary("glock") && !is_primary("usp") && !is_primary("rpg"));
     }
 
     #[test]

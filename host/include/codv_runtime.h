@@ -48,6 +48,7 @@ enum CvOutputFlags : std::uint32_t {
     CV_OUT_CROUCH_CHANGED = 1u << 5, // apply or clear the crouch clipsets
     CV_OUT_CROUCHED = 1u << 6,
     CV_OUT_ACTIVE = 1u << 7,         // a CODV weapon is in hand: CODV owns firing
+    CV_OUT_SILENCED = 1u << 8,       // ABI 10 addition: the gun in hand has a silencer (an older runtime: never)
 };
 
 // CvHud::flags
@@ -118,6 +119,30 @@ enum CvOption : std::uint32_t {
     CV_OPT_MW2_ATTACH_PRIMARY_2 = 50,
     CV_OPT_MW2_ATTACH_SECONDARY_1 = 51,
     CV_OPT_MW2_ATTACH_SECONDARY_2 = 52,
+    // Scarce supplies (1): kills give no Scavenger pack whatever CV_OPT_SCAVENGER says; ammunition comes from
+    // what the host finds (cv_mw2_supply). 0, the default: as ever, and a found-guns run (CV_SUPPLY_SCARCE) ends:
+    // the loadout the options had set is back. A runtime without it returns 0.
+    CV_OPT_SCARCE = 53,
+};
+// cv_mw2_supply kinds (ABI 10 addition). PACK: a pack found (a magazine more for every carried gun and, when
+// one is carried, a frag: MW2's Scavenger pickup with its icon). SCARCE: the start of a found-guns run (one
+// random handgun with its magazine and one spare, no grenades; the loadout options wait until CV_OPT_SCARCE
+// goes off). GUN_LIGHT, GUN_HEAVY: a gun found in such a run (a machine pistol, SMG or shotgun; an assault
+// rifle, LMG or sniper rifle), one not carried yet: it is added to the guns behind its kind's key (a primary
+// behind key 1, a secondary behind key 2, where the handgun starts; the key again goes round them; 0: every
+// one of that kind is carried). FRAG, TACTICAL: one more of the grenade in play (0: full). GUNS, PRIMARIES:
+// how many guns are carried, and how many of them behind key 1; LAST_GUN: the gun found last, as 1 + its
+// menu index (cv_mw2_gun_info's; 0: none yet). The asking ones change nothing.
+enum CvSupply : std::uint32_t {
+    CV_SUPPLY_PACK = 0,
+    CV_SUPPLY_SCARCE = 1,
+    CV_SUPPLY_GUN_LIGHT = 2,
+    CV_SUPPLY_GUN_HEAVY = 3,
+    CV_SUPPLY_FRAG = 4,
+    CV_SUPPLY_TACTICAL = 5,
+    CV_SUPPLY_GUNS = 6,
+    CV_SUPPLY_PRIMARIES = 7,
+    CV_SUPPLY_LAST_GUN = 8,
 };
 
 // Killstreak rewards (MW2's killstreakTable references); stage 1 implements UAV and EMP.
@@ -352,6 +377,26 @@ struct CvVmDraw {
     char color_map[64];
     char normal_map[64];
 };
+// MW2's view muzzle flash (ABI 10 addition, optional export cv_vm_fx): sprites in the view model's space (as
+// the bones: D3D view axes, inches; corners bottom left, bottom right, top right, top left), their atlas cell
+// (u0, v0, u1, v1), MW2's colour, CV_VM_FX_ADD (added: its material blends ONE, ONE; else alpha-blended) and
+// colour map (a file stem under <data>\mw2\viewmodels\images\); and the lights it casts (GTA world metres,
+// colour 0..1, range metres, MW2's intensity).
+enum CvVmFxFlags : std::uint32_t { CV_VM_FX_ADD = 1u << 0 };
+struct CvVmFxQuad {
+    float corners[4][3];
+    float uv[4];
+    std::uint8_t rgba[4];
+    std::uint32_t flags; // CvVmFxFlags
+    char image[64];
+};
+struct CvVmFxLight {
+    float position[3];
+    float color[3];
+    float range;
+    float intensity;
+};
+static_assert(sizeof(CvVmFxQuad) == 136 && offsetof(CvVmFxQuad, flags) == 68 && sizeof(CvVmFxLight) == 32);
 static_assert(sizeof(CvVmFrame) == 32 && sizeof(CvVmMeshInfo) == 32);
 static_assert(sizeof(CvVmVertex) == 68 && offsetof(CvVmVertex, bones) == 48);
 static_assert(sizeof(CvVmDraw) == 144);
@@ -701,10 +746,17 @@ typedef std::uint32_t (*CvAliasLevelFn)(void*, std::uint32_t handle, float level
 typedef std::uint32_t (*CvMw2BlockedWhyFn)(void*, float forward, float right, char* out, std::uint32_t capacity);
 typedef std::uint32_t (*CvMw2WeaponNumbersFn)(const void*, const char*, CvWeaponNumbers*);
 typedef std::uint32_t (*CvMw2RefillFn)(void*);
+// ABI 10 addition (optional): the MW2 player's supplies changed by the host (CvSupply). Returns 1 when done
+// (CV_SUPPLY_GUNS, CV_SUPPLY_PRIMARIES: the count; CV_SUPPLY_LAST_GUN: 1 + a menu index).
+typedef std::uint32_t (*CvMw2SupplyFn)(void*, std::uint32_t kind);
 // ABI 10: the image file stems of the view models the player can hold next ("c:stem" colour maps,
 // "n:stem" normal maps) and of MW2's HUD ("h:stem"), '\n'-separated and NUL-terminated (returns the length, 0: none or too small). Decodes the
 // models it has not yet: call it from a worker thread, before the mode is on.
 typedef std::uint32_t (*CvVmReadyImagesFn)(const void*, char* out, std::uint32_t capacity);
+// ABI 10 addition (optional): the view muzzle flash of the last cv_mw2_step: up to quad_cap sprites (their
+// count into *quad_count) and up to light_cap lights; returns the light count.
+typedef std::uint32_t (*CvVmFxFn)(const void*, CvVmFxQuad* quads, std::uint32_t quad_cap, std::uint32_t* quad_count,
+                                  CvVmFxLight* lights, std::uint32_t light_cap);
 // ABI 10: the GTA weapons standing in for the loadout's guns (no repeats; returns how many): the host gives
 // them and keeps their models loaded, so a weapon switch does not wait for GTA's streaming.
 typedef std::uint32_t (*CvMw2ReadyHashesFn)(const void*, std::uint32_t* out, std::uint32_t capacity);

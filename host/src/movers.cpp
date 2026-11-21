@@ -1,5 +1,7 @@
 #include "movers.h"
 
+#include "door_rules.h"
+#include "doors.h"
 #include "game_probe.h"
 #include "natives.h"
 
@@ -25,17 +27,36 @@ void Put(float (&dst)[3], const Vector3& v) {
 }
 } // namespace
 
-bool Gatherer::IsDoor(int entity, Hash model, const Vector3& at) {
+bool Gatherer::IsDoor(int entity, Hash model, const Vector3& at, const Box& box, Hash& system) {
     // A handle is reused by later objects: look again when the model or spot changed.
     auto it = doors_.find(entity);
+    bool door = false;
     if (it != doors_.end() && it->second.model == model && std::fabs(it->second.x - at.x) < 0.5f &&
-        std::fabs(it->second.y - at.y) < 0.5f)
-        return it->second.door;
-    Hash door = 0;
-    const bool isDoor = Call<BOOL>(gta::DOOR_SYSTEM_FIND_EXISTING_DOOR, at.x, at.y, at.z, model, &door) != FALSE;
-    if (doors_.size() > 4096) doors_.clear();
-    doors_[entity] = {model, at.x, at.y, isDoor};
-    return isDoor;
+        std::fabs(it->second.y - at.y) < 0.5f) {
+        door = it->second.door;
+        system = it->second.system;
+        // A door's registration comes and goes (CODV registers the game's unregistered doors while it holds them
+        // open): asked again each time.
+        if (door) {
+            Hash found = 0;
+            system = Call<BOOL>(gta::DOOR_SYSTEM_FIND_EXISTING_DOOR, at.x, at.y, at.z, model, &found) ? found : 0;
+        }
+    } else {
+        Hash found = 0;
+        const bool registered = Call<BOOL>(gta::DOOR_SYSTEM_FIND_EXISTING_DOOR, at.x, at.y, at.z, model, &found) != FALSE;
+        system = registered ? found : 0;
+        // The game's doors, and the many it never registered: anything door-shaped.
+        door = registered || doors::DoorShaped(box.lo, box.hi);
+        if (doors_.size() > 4096) doors_.clear();
+        doors_[entity] = {model, at.x, at.y, door, system};
+    }
+    // A door the game locked (a mission's) stays solid: checked each time, a lock comes and goes. Not CODV's own
+    // hold on a door it opened (doors.cpp keeps it open with the same lock).
+    if (door && system && !doors::Holding(entity) && doors::Locked(Call<int>(gta::DOOR_SYSTEM_GET_DOOR_STATE, system))) {
+        ++stats_.lockedDoors;
+        return false;
+    }
+    return door;
 }
 
 bool Gatherer::Add(int entity, std::uint32_t kind) {
@@ -54,6 +75,10 @@ bool Gatherer::Add(int entity, std::uint32_t kind) {
         }
     } else if (kind == CV_MOVER_OBJECT && Call<BOOL>(gta::IS_ENTITY_ATTACHED, entity)) {
         return false;
+    } else if (kind == CV_MOVER_OBJECT && Call<BOOL>(gta::GET_ENTITY_COLLISION_DISABLED, entity)) {
+        // An object GTA itself lets everything through (a script turned its collision off: a pickup, a plant):
+        // not solid for the MW2 player either, and never taken for a door.
+        return false;
     } else if (kind == CV_MOVER_OBJECT && Call<BOOL>(gta::HAS_OBJECT_BEEN_BROKEN, entity, 0)) {
         // A breakable prop that broke (a fence blown apart): its model's collision is the whole prop,
         // read once per model, so it stood as an invisible wall where the prop was. Its pieces are
@@ -71,8 +96,16 @@ bool Gatherer::Add(int entity, std::uint32_t kind) {
     // The pinned alloc8or DB names the outputs forward, right, up, position (as SK8V reads them).
     Vector3 fwd{}, right{}, up{}, pos{};
     Call<void>(gta::GET_ENTITY_MATRIX, entity, &fwd, &right, &up, &pos);
-    if (kind == CV_MOVER_OBJECT && IsDoor(entity, model, pos)) {
+    Hash system = 0;
+    if (kind == CV_MOVER_OBJECT && IsDoor(entity, model, pos, box->second, system)) {
         ++stats_.doors;
+        Door d;
+        d.entity = entity, d.model = model, d.system = system;
+        Put(d.pos, pos);
+        Put(d.right, right);
+        Put(d.fwd, fwd);
+        for (int k = 0; k < 3; ++k) d.lo[k] = box->second.lo[k], d.hi[k] = box->second.hi[k];
+        nearDoors_.push_back(d);
         return false;
     }
     CvMover m{};
@@ -93,10 +126,13 @@ bool Gatherer::Add(int entity, std::uint32_t kind) {
 
 const std::vector<CvMover>& Gatherer::Gather(Ped self, const Vector3& center, float radius) {
     out_.clear();
+    nearDoors_.clear();
     nearby_.clear();
     stats_ = {};
     scratch_.resize(kPoolScratch);
-    const int ownVehicle = Call<int>(gta::GET_VEHICLE_PED_IS_IN, self, FALSE);
+    // The vehicle the player sits in only: GTA goes on naming the one just left, which then stayed out of the
+    // MW2 world (the player walked through the car they got out of).
+    const int ownVehicle = Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, self, FALSE) ? Call<int>(gta::GET_VEHICLE_PED_IS_IN, self, FALSE) : 0;
     const float r2 = radius * radius;
     const auto collect = [&](int (*pool)(int*, int), std::uint32_t kind) {
         const int n = pool(scratch_.data(), kPoolScratch);

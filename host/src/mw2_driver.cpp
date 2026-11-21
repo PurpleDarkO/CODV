@@ -30,6 +30,7 @@ constexpr float kHull = 15.0f * 0.0254f, kHullHeight = 70.0f * 0.0254f;
 constexpr unsigned kTraceMask = 0x02810011u;
 // GTA moved the ped this far from where MW2 put it: a teleport.
 constexpr float kTeleport = 3.0f;
+constexpr float kQuietWalkSpeed = 2.6f; // m/s: slower than this (a walk) the steps make no sound
 // After the enter key, GTA keeps the player this long (it walks to the door).
 constexpr DWORD kEnterHandBack = 2500;
 // The enter key at a vehicle: GTA's enter task runs (to the driver's door, jacking a driver as GTA's own
@@ -39,10 +40,11 @@ constexpr DWORD kEnterStart = 800, kEnterGiveUp = 10000;
 // vehicle nor lends the player to GTA for a ladder (GTA's own F stays off; ladders: walk into one).
 // Out of a vehicle, GTA keeps the player this much longer (the step away from the door, off a bike).
 constexpr DWORD kLeaveSettle = 100;
-constexpr Hash kUnarmed = 0xA2719263; // weapon_unarmed
 // Vehicles in GTA's own first person: MW2's eye eases into GTA's camera (and back out) over this long
 // instead of a cut (a black fade broke the immersion). 4: GTA's first-person view mode.
-constexpr int kCamEaseMs = 450, kFirstPersonView = 4;
+constexpr int kCamEaseMs = 450;
+constexpr int kExitVehicleTask = 2; // GTA's CTaskExitVehicle
+constexpr DWORD kExitHold = 1200;   // F in the seat: GTA has the player at least this long
 // eTaskType: CTaskClimbLadder, CTaskGoToAndClimbLadder, CTaskClimbLadderFully.
 constexpr int kLadderTasks[] = {1, 47, 48};
 // After the enter key, GTA's own ladder or vehicle task has this long to start (the ped was frozen).
@@ -227,6 +229,15 @@ bool Pressed(int control) { return Call<BOOL>(gta::IS_DISABLED_CONTROL_PRESSED, 
 
 const char* Driver::Ineligible(Ped player, DWORD now) {
     seated_ = false;
+    const Vector3 at = Call<Vector3>(gta::GET_ENTITY_COORDS, player, TRUE);
+    // Where MW2 finds no ground but GTA stands the player (controls::FootingOver): GTA's for a while.
+    if (footing_) {
+        const float walked = std::hypot(at.x - footingFrom_[0], at.y - footingFrom_[1]);
+        if (!controls::FootingOver(walked, now - footingAt_)) return "no MW2 ground here";
+        footing_ = false;
+        bounces_ = 0;
+        util::Logf(log_, "CODV: %s, MW2 tries the ground again", walked > controls::kFootingLeave ? "walked off" : "a while later");
+    }
     // GTA's parachute: a long fall with one on the back is GTA's (skydive, then the chute) until the ground.
     if (skydive_) {
         const int chute = Call<int>(gta::GET_PED_PARACHUTE_STATE, player);
@@ -234,6 +245,20 @@ const char* Driver::Ineligible(Ped player, DWORD now) {
             chute == 2)
             return "skydive";
         skydive_ = false;
+        // Over at once where it began: GTA has the ped standing where MW2 found no ground (a bounce).
+        const float moved = std::hypot(at.x - skydiveFrom_[0], at.y - skydiveFrom_[1], at.z - skydiveFrom_[2]);
+        bounces_ = controls::Bounces(bounces_, now - skydiveAt_, moved);
+        if (bounces_ >= controls::kBouncesToHold) {
+            footing_ = true;
+            footingAt_ = now;
+            footingFrom_[0] = at.x, footingFrom_[1] = at.y, footingFrom_[2] = at.z;
+            const Entity on = Call<BOOL>(gta::IS_ENTITY_ATTACHED, player) ? Call<Entity>(gta::GET_ENTITY_ATTACHED_TO, player) : 0;
+            util::Logf(log_, "CODV: MW2 finds no ground where GTA stands the player (%.1f %.1f %.1f; GTA's height over ground %.1f m; "
+                             "attached to %08X): GTA's movement until it walks %.0f m off",
+                       at.x, at.y, at.z, Call<float>(gta::GET_ENTITY_HEIGHT_ABOVE_GROUND, player),
+                       on ? Call<Hash>(gta::GET_ENTITY_MODEL, on) : 0u, controls::kFootingLeave);
+            return "no MW2 ground here";
+        }
         util::Logf(log_, "CODV: skydive over, MW2 takes the player back");
     }
     if (active_ && !(last_.flags & CV_MOVE_ON_GROUND) && last_.velocity[2] < kSkydiveSpeed &&
@@ -242,7 +267,9 @@ const char* Driver::Ineligible(Ped player, DWORD now) {
         float ground = 0.0f;
         if (!Call<BOOL>(gta::GET_GROUND_Z_FOR_3D_COORD, f[0], f[1], f[2], &ground, FALSE, FALSE) || f[2] - ground > kSkydiveHeight) {
             skydive_ = true;
-            util::Logf(log_, "CODV: long fall with a parachute: GTA's skydive");
+            skydiveAt_ = now;
+            skydiveFrom_[0] = at.x, skydiveFrom_[1] = at.y, skydiveFrom_[2] = at.z;
+            if (!bounces_) util::Logf(log_, "CODV: long fall with a parachute: GTA's skydive");
             return "skydive";
         }
     }
@@ -291,20 +318,108 @@ const char* Driver::Ineligible(Ped player, DWORD now) {
             return "entering a vehicle";
         }
     }
-    EnterKey(now);
-    // The enter action: none from the keyboard while MW2 drives (F is the knife); a press otherwise (a pad's Y).
     const bool keyboard = Call<BOOL>(gta::IS_USING_KEYBOARD_AND_MOUSE, 2) != FALSE;
-    const bool enterAction = !(active_ && keyboard) && Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kEnter) != FALSE;
-    if (enterAction) {
-        // F on the keyboard never enters a vehicle (it is the knife); a pad's Y still does.
-        const Vehicle target = !active_ || keyboard ? 0 : VehicleAhead(player, view_);
+    // GTA's shops (controls::InteractOver): E held a moment (D-pad right on a pad) in one hands the player to
+    // GTA, its camera and its ped, so GTA offers its prompt (a shop's "press E"); a tap of E then is GTA's.
+    // Elsewhere E held is the lean only.
+    {
+        const bool down = keyboard ? Pressed(ksrules::kContext) : (padButtons_ & pad::kDpadRight) != 0;
+        if (!down) eDown_ = false, interactAsked_ = false;
+        else if (!eDown_) eDown_ = true, eDownAt_ = now;
+        if (active_ && down && !interactAsked_ && !interactBlocked_ && !interactUntil_ && now - eDownAt_ >= controls::kInteractHoldMs) {
+            interactAsked_ = true; // once a press
+            const Vector3 p = Call<Vector3>(gta::GET_ENTITY_COORDS, player, TRUE);
+            // A shop: an interior with a shop's radar icon near, or with GTA's shop script running (they run
+            // while the player is at a shop; a story mission may hide the icons).
+            const int interiorId = Call<int>(gta::GET_INTERIOR_FROM_ENTITY, player);
+            const bool interior = interiorId != 0;
+            bool icon = false;
+            for (int sprite : controls::kShopBlips) {
+                for (int b = Call<int>(gta::GET_FIRST_BLIP_INFO_ID, sprite); !icon && Call<BOOL>(gta::DOES_BLIP_EXIST, b);
+                     b = Call<int>(gta::GET_NEXT_BLIP_INFO_ID, sprite)) {
+                    const Vector3 at = Call<Vector3>(gta::GET_BLIP_INFO_ID_COORD, b);
+                    icon = controls::InShop(interior, at.x - p.x, at.y - p.y, at.z - p.z);
+                }
+                if (icon) break;
+            }
+            const char* script = nullptr;
+            static constexpr const char* kShopScripts[] = {"gunclub_shop", "clothes_shop_sp", "hairdo_shop_sp", "tattoo_shop"};
+            for (const char* name : kShopScripts)
+                if (!script && Call<int>(gta::GET_NUMBER_OF_THREADS_RUNNING_THE_SCRIPT_WITH_THIS_HASH, util::Joaat(name)) > 0) script = name;
+            const bool shop = interior && (icon || script);
+            Hash interiorName = 0;
+            if (interior) {
+                Vector3 where{};
+                Call<void>(gta::GET_INTERIOR_LOCATION_AND_NAMEHASH, interiorId, &where, &interiorName);
+            }
+            if (!shop) {
+                if (interactMisses_ < 10) {
+                    ++interactMisses_;
+                    util::Logf(log_, "CODV: interaction: E held, no shop here (%s; interior %08X, shop script %s): the lean only",
+                               interior ? "no shop's icon near" : "outdoors", interiorName, script ? script : "none");
+                }
+            } else {
+                util::Logf(log_, "CODV: interaction: a shop (interior %08X; %s%s%s)", interiorName, icon ? "its icon" : "",
+                           icon && script ? ", " : "", script ? script : "");
+                interactAt_[0] = p.x, interactAt_[1] = p.y, interactAt_[2] = p.z;
+                interactUntil_ = now + controls::kInteractWindowMs;
+                interactCap_ = now + controls::kInteractMaxMs;
+                interactSeen_ = now;
+                interactTaken_ = false;
+                util::Logf(log_, "CODV: interaction: %s held in a shop, GTA has the player for its prompt", keyboard ? "E" : "D-pad right");
+            }
+        }
+        if (interactUntil_) {
+            // Not ticked for a while: GTA had the player (its shop's menu took control).
+            if (now - interactSeen_ > 400) interactTaken_ = true;
+            interactSeen_ = now;
+            const Player me = Call<Player>(gta::PLAYER_ID);
+            const bool control = Call<BOOL>(gta::IS_PLAYER_CONTROL_ON, me) != FALSE;
+            if (!control) interactTaken_ = true;
+            const Vector3 p = Call<Vector3>(gta::GET_ENTITY_COORDS, player, TRUE);
+            const float moved = std::hypot(p.x - interactAt_[0], p.y - interactAt_[1]);
+            const bool prompt = Call<BOOL>(gta::IS_HELP_MESSAGE_BEING_DISPLAYED) != FALSE;
+            // The move keys (read through their being off): moving ends it, MW2 walks the player on.
+            const float moveInput = std::hypot(Call<float>(gta::GET_DISABLED_CONTROL_NORMAL, 0, kMoveLR),
+                                               Call<float>(gta::GET_DISABLED_CONTROL_NORMAL, 0, kMoveUD));
+            const controls::InteractEnd end = controls::InteractOver(interactTaken_, control, moved, moveInput, prompt,
+                                                                     static_cast<int>(now - interactUntil_) >= 0,
+                                                                     static_cast<int>(now - interactCap_) >= 0);
+            if (end == controls::InteractEnd::None) {
+                // The ped stands still for GTA's prompt: no walk, sprint or jump (the camera looks about).
+                for (int c : {controls::kMoveLR, controls::kMoveUD, controls::kMoveUpOnly, controls::kMoveDownOnly,
+                              controls::kMoveLeftOnly, controls::kMoveRightOnly, kSprint, kJump})
+                    Call<void>(gta::DISABLE_CONTROL_ACTION, 0, c, TRUE);
+                return "interaction";
+            }
+            static const char* const kWhy[] = {"", "GTA gave the player back", "the player moved", "nothing offered", "too long"};
+            util::Logf(log_, "CODV: interaction over (%s), MW2 takes the player back", kWhy[static_cast<int>(end)]);
+            interactUntil_ = 0;
+        }
+    }
+    EnterKey(now, active_ && keyboard && VehicleAround(player));
+    // The enter action: from the keyboard while MW2 drives, F held a moment at a vehicle (a tap is the knife);
+    // a press otherwise (a pad's Y).
+    const bool held = active_ && keyboard && fHoldEnter_;
+    const bool enterAction = held || (!(active_ && keyboard) && Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kEnter) != FALSE);
+    if (held) fHoldEnter_ = false;
+    // In a vehicle (the walk to its door, the seat, GTA's way out): the key there is GTA's own (F gets out),
+    // never a ladder try. Before, getting out armed one: MW2's gun and HUD came back frozen over GTA's exit
+    // animation until the try's window was over.
+    const bool vehicleNow = !Call<BOOL>(gta::IS_PED_ON_FOOT, player) || Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, TRUE) ||
+                            Call<BOOL>(gta::GET_IS_TASK_ACTIVE, player, kExitVehicleTask);
+    if (vehicleNow && !active_) {
+        ladderTryAt_ = 0, ladderUntil_ = 0, taskAt_ = 0;
+        // The way out asked for: GTA keeps the player at least this long (its exit animation), as a vehicle's.
+        if (enterAction) ladderHandBack_ = false, handBackUntil_ = now + kExitHold;
+    }
+    if (enterAction && !(vehicleNow && !active_)) {
+        const Vehicle target = !active_ ? 0 : VehicleAhead(player, view_);
         if (target) {
             enterVehicle_ = target;
             enterSent_ = false;
             enterAt_ = now;
             util::Logf(log_, "CODV: vehicle: entering 0x%08X", Call<Hash>(gta::GET_ENTITY_MODEL, target));
-            // Empty hands on the way in: GTA's gun showed in the driving view (gunplay takes it again after).
-            Call<void>(gta::SET_CURRENT_PED_WEAPON, player, kUnarmed, TRUE);
             vehicleReason_ = true;
             return "entering a vehicle";
         }
@@ -350,7 +465,10 @@ const char* Driver::Ineligible(Ped player, DWORD now) {
     }
     ladderHandBack_ = false;
     if (Call<BOOL>(gta::IS_PED_DEAD_OR_DYING, player, TRUE)) return "dead"; // before a vehicle: no borrow
-    if (!Call<BOOL>(gta::IS_PED_ON_FOOT, player) || Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, TRUE)) {
+    // GTA's way out of the seat (its task: the door, the step down) counts as the vehicle still: MW2 takes
+    // the player only once it is over, so its gun never shows over GTA's animation.
+    if (!Call<BOOL>(gta::IS_PED_ON_FOOT, player) || Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, TRUE) ||
+        Call<BOOL>(gta::GET_IS_TASK_ACTIVE, player, kExitVehicleTask)) {
         vehicleReason_ = true;
         // GTA's screen from the seat on, through the way out, until MW2 takes the player back; on the way
         // in (getting into it) MW2's HUD stays.
@@ -450,6 +568,7 @@ void Driver::Place(Ped player, const Settings& s) {
 }
 
 bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, float kickYaw, DWORD now) {
+    seatRules_ = s.seatRules;
     // MW2's camera left behind while it eased into GTA's: gone once the ease is over.
     if (easeCam_ && static_cast<int>(now - easeCamUntil_) >= 0) {
         if (easeCam_ != cam_) Call<void>(gta::DESTROY_CAM, easeCam_, FALSE);
@@ -459,48 +578,29 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
         // GTA climbs a ladder: MW2's first-person view stays on, at the ped's head, looking where GTA's
         // camera looks (the player still looks around with the mouse / stick).
         // A ladder or a skydive only borrows the player: MW2's HUD stays (the host keeps drawing it).
-        // A vehicle borrows it too: MW2's player, gun and magazine wait for the way out, and the HUD
-        // stays without the weapon bar and the crosshair.
-        const bool borrow = (ladderReason_ || skydive_ || vehicleReason_) && (active_ || borrowed_);
+        // A vehicle borrows it too, and is GTA's alone (the walk to its door, the seat, the way out): its
+        // camera, HUD, body and weapons; MW2's player, gun and magazine wait for the way out.
+        const bool borrow = (ladderReason_ || skydive_ || vehicleReason_ || footing_) && (active_ || borrowed_);
         inVehicle_ = vehicleReason_ && borrow;
         if (ladderReason_ && !thirdPerson_ && (active_ || viewHeld_)) {
             Release(player, why, true, true);
             HoldView(player, s);
         } else if (borrow) {
-            const bool falling = skydive_ && active_;
+            const bool falling = skydive_ && active_ && !bounces_;
             Release(player, why, false, true);
-            // A vehicle in GTA's first person (and the walk to its door): MW2's HUD and gun on screen, GTA's
-            // own body (its arms on the wheel) hidden; in GTA's third person the driver shows.
-            const bool inside = Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, TRUE) != FALSE;
-            // Without the view key a vehicle stays in GTA's first person (its camera key, V, is off).
-            if (inVehicle_ && !s.thirdPersonKey) {
-                Call<void>(gta::DISABLE_CONTROL_ACTION, 0, controls::kNextCamera, TRUE);
-                if (inside && Call<int>(gta::GET_FOLLOW_VEHICLE_CAM_VIEW_MODE) != kFirstPersonView)
-                    Call<void>(gta::SET_FOLLOW_VEHICLE_CAM_VIEW_MODE, kFirstPersonView);
-            }
-            vehicleFirstPerson_ = inVehicle_ && (inside ? Call<int>(gta::GET_FOLLOW_VEHICLE_CAM_VIEW_MODE)
-                                                        : Call<int>(gta::GET_FOLLOW_PED_CAM_VIEW_MODE)) == kFirstPersonView;
-            SetHidden(player, 0, vehicleFirstPerson_);
-            if (vehicleFirstPerson_) Call<void>(gta::SET_ENTITY_LOCALLY_INVISIBLE, player);
-            // Seated with MW2's gun on screen: it fires out of the vehicle.
-            seatedGun_ = vehicleFirstPerson_ && Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, FALSE) && borrowed_;
-            if (seatedGun_) SeatedGun(s, dt);
             // The fall goes on in GTA at MW2's speed.
             if (falling) Call<void>(gta::SET_ENTITY_VELOCITY, player, last_.velocity[0], last_.velocity[1], last_.velocity[2]);
         } else {
             Stop(player, why);
         }
-        // GTA's own HUD stays off under MW2's (in a vehicle too).
-        if (borrowed_) HideGtaHud();
+        // GTA's own HUD stays off under MW2's (a ladder, a skydive; not in a vehicle).
+        if (borrowed_ && !inVehicle_) HideGtaHud();
         // GTA's own F enters no vehicle while it only borrows the player (a ladder try, the way into the
         // vehicle picked); in the seat F still gets out.
         if (borrowed_ && !Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, FALSE))
             Call<void>(gta::DISABLE_CONTROL_ACTION, 0, kEnter, TRUE);
-        if (!inVehicle_ || !borrowed_) vehicleFirstPerson_ = false, seatedGun_ = false;
         return false;
     }
-    vehicleFirstPerson_ = false;
-    seatedGun_ = false;
     HideGtaHud();
     if (active_) {
         // GTA moved the ped itself (a mission, a respawn): start again from there.
@@ -522,6 +622,7 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
     r.lookX = Call<float>(look, 0, kLookLR);
     r.lookY = Call<float>(look, 0, kLookUD);
     r.sprint = Pressed(kSprint), r.jump = Pressed(kJump), r.duck = Pressed(kDuck);
+    r.walk = r.mouse && Pressed(input::kWalkKey); // Caps Lock held: a quiet walk
     r.ads = Pressed(kAim), r.attack = Pressed(kAttack);
     // The knife: F on the keyboard (a tap; held, F enters a vehicle), R3 on a pad.
     r.reload = Pressed(kReload), r.melee = r.mouse ? fTap_ : Pressed(kLookBehind);
@@ -536,11 +637,20 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
                               : down && !altPadHeld_;
         altPadHeld_ = down;
     }
-    // CODV's lean: Q / E on the keyboard (GTA's cover and context keys; MW2 mode takes them).
-    if (r.mouse) r.leanLeft = Pressed(controls::kCover), r.leanRight = Pressed(ksrules::kContext);
+    // CODV's lean: Q / E on the keyboard (GTA's cover and context keys; MW2 mode takes them). Not E while GTA
+    // shows a help message: E is GTA's then (a shop's "press E", controls::Suppressed).
+    if (r.mouse) {
+        r.leanLeft = Pressed(controls::kCover);
+        r.leanRight = Pressed(ksrules::kContext) && Call<BOOL>(gta::IS_HELP_MESSAGE_BEING_DISPLAYED) == FALSE;
+    }
     if (s.numberKeys)
         for (int i = 0; i < 4; ++i)
             if (Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, input::kSlotKeys[i])) r.slot = i + 1;
+    // The slot a mission's weapon asked for (once MW2 drives).
+    if (pendingSlot_ && active_) {
+        if (!r.slot) r.slot = pendingSlot_;
+        pendingSlot_ = 0;
+    }
     r.nextWeapon = Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kWheelNext) ||
                    Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kWheelPrev) ||
                    Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, kSelectWeapon);
@@ -721,17 +831,31 @@ bool Driver::Tick(Ped player, const Settings& s, float dt, float kickPitch, floa
             cam_ = Call<int>(gta::CREATE_CAM_WITH_PARAMS, "DEFAULT_SCRIPTED_CAMERA", out.eye[0], out.eye[1], out.eye[2],
                              out.pitch, 0.0f, out.heading, mw2input::VerticalFov(s.fov), TRUE, 2);
         viewHeld_ = false;
-        // Out of a vehicle: GTA's first-person camera eases into MW2's eye (no cut, no fade).
+        // Out of a vehicle: GTA's camera eases into MW2's eye (no cut, no fade).
         Call<void>(gta::RENDER_SCRIPT_CAMS, TRUE, easeIn_ ? TRUE : FALSE, easeIn_ ? kCamEaseMs : 0, TRUE, FALSE, 0);
+        // The camera flies from GTA's (behind the vehicle) to MW2's eye: no gun on screen until it is there.
+        if (easeIn_) easeInUntil_ = GetTickCount() + kCamEaseMs;
         easeIn_ = false;
         util::Logf(log_, "CODV: MW2 movement drives the player");
         lastWhy_ = "";
+        // A story mission gave a weapon while CODV's hands were off (or switched to a character holding one):
+        // MW2 starts on the matching slot (a sniper on the sniper).
+        if (Call<BOOL>(gta::GET_MISSION_FLAG) && !releasedBorrowed_) {
+            const Hash gtaWeapon = Call<Hash>(gta::GET_SELECTED_PED_WEAPON, player);
+            if (player != releasedPed_ || gtaWeapon != releasedWeapon_) {
+                pendingSlot_ = controls::SlotForGtaGroup(Call<Hash>(gta::GET_WEAPONTYPE_GROUP, gtaWeapon));
+                if (pendingSlot_)
+                    util::Logf(log_, "CODV: the mission's GTA weapon %08X: MW2 starts on slot %d", gtaWeapon, pendingSlot_);
+            }
+        }
     }
     Place(player, s);
     // GTA's footsteps: the frozen ped's feet (MW2's run on its skeleton) still make GTA's step sounds.
     if (s.gtaFootsteps) {
-        Call<void>(gta::SET_PED_FOOTSTEPS_EVENTS_ENABLED, player, TRUE);
-        Call<void>(gta::SET_FORCE_FOOTSTEP_UPDATE, player, TRUE);
+        // At a walk (Caps Lock held, slower than 2.6 m/s) the steps make no sound, as MW2's own then.
+        const bool quiet = std::hypot(last_.velocity[0], last_.velocity[1]) < kQuietWalkSpeed;
+        Call<void>(gta::SET_PED_FOOTSTEPS_EVENTS_ENABLED, player, quiet ? FALSE : TRUE);
+        Call<void>(gta::SET_FORCE_FOOTSTEP_UPDATE, player, quiet ? FALSE : TRUE);
     } else if (static_cast<int>(now - surfaceAt_) >= 0) {
         // MW2's footsteps: the ground's GTA material picks the step (grass, metal, wood...), four times a second.
         surfaceAt_ = now + 250;
@@ -797,14 +921,17 @@ void Driver::Stop(Ped player, const char* why) { Release(player, why, false, fal
 
 void Driver::Release(Ped player, const char* why, bool keepView, bool borrow) {
     pushSince_ = 0;
-    // A vehicle's borrow keeps the body hidden in first person (Tick decides each frame).
-    if (hidden_ && !keepView && !(borrow && vehicleReason_)) SetHidden(player, 0, false);
+    if (hidden_ && !keepView) SetHidden(player, 0, false);
     // Borrowed: the MW2 player stays (its HUD keeps drawing; Start spawns it afresh where GTA leaves the ped).
     if ((spawned_ || borrowed_) && !borrow) runtime_.Mw2Despawn();
     borrowed_ = borrow && (spawned_ || borrowed_);
     spawned_ = false;
     view_.active = false;
     const bool wasActive = active_;
+    if (active_) {
+        releasedBorrowed_ = borrow; // a vehicle, a ladder, a skydive: MW2 keeps its gun on the way back
+        if (!borrow) releasedPed_ = player, releasedWeapon_ = Call<Hash>(gta::GET_SELECTED_PED_WEAPON, player);
+    }
     if (active_) {
         active_ = false;
         Call<void>(gta::FREEZE_ENTITY_POSITION, player, FALSE);
@@ -817,10 +944,11 @@ void Driver::Release(Ped player, const char* why, bool keepView, bool borrow) {
         viewHeld_ = cam_ != 0;
     } else if (cam_ && (wasActive || viewHeld_)) {
         if (vehicleReason_) {
-            // Into a vehicle: GTA's first person on foot (the walk to the door) and in the vehicle, MW2's eye
-            // easing into it; the camera is destroyed once the ease is over.
-            Call<void>(gta::SET_FOLLOW_PED_CAM_VIEW_MODE, kFirstPersonView);
-            Call<void>(gta::SET_FOLLOW_VEHICLE_CAM_VIEW_MODE, kFirstPersonView);
+            // Into a vehicle: GTA's first person on foot (the walk to the door), MW2's eye easing into it; the
+            // camera is destroyed once the ease is over. In the vehicle GTA's own camera, as the player left it.
+            // The zombie modes (seat rules): GTA's third person from the walk to the door on, as in the seat and
+            // on the way out.
+            Call<void>(gta::SET_FOLLOW_PED_CAM_VIEW_MODE, seatRules_ ? controls::kViewThirdMedium : controls::kViewFirstPerson);
             Call<void>(gta::RENDER_SCRIPT_CAMS, FALSE, TRUE, kCamEaseMs, TRUE, FALSE, 0);
             if (easeCam_ && easeCam_ != cam_) Call<void>(gta::DESTROY_CAM, easeCam_, FALSE);
             easeCam_ = cam_;
@@ -986,45 +1114,27 @@ void Driver::DrawDebug(Ped player, DWORD now) {
     }
 }
 
-// MW2's gun in a vehicle's seat: the MW2 player (kept for the HUD while GTA drives) steps standing still,
-// only the trigger, the aim, the reload and the weapon keys reaching it: the weapon fires, kicks, reloads
-// and switches as on foot, and the gunplay shoots from GTA's camera, past the vehicle. GTA's own
-// vehicle weapons, aim, weapon wheel and the cinematic camera (R) are off meanwhile.
-void Driver::SeatedGun(const Settings& s, float dt) {
-    constexpr int kVehAim = 68, kVehAttack = 69, kVehAttack2 = 70, kVehCinCam = 80, kPassengerAim = 91,
-                  kPassengerAttack = 92, kVehNextWeapon = 99, kVehPrevWeapon = 100, kVehFlyAttack = 114;
-    for (int c : {kAttack, kAim, kVehAim, kVehAttack, kVehAttack2, kVehCinCam, kPassengerAim, kPassengerAttack,
-                  kVehNextWeapon, kVehPrevWeapon, kVehFlyAttack, kSelectWeapon, static_cast<int>(kReload)})
-        Call<void>(gta::DISABLE_CONTROL_ACTION, 0, c, TRUE);
-    const auto pressed = [](int a, int b) {
-        return Call<BOOL>(gta::IS_DISABLED_CONTROL_PRESSED, 0, a) || Call<BOOL>(gta::IS_DISABLED_CONTROL_PRESSED, 0, b);
-    };
-    const auto tapped = [](int c) { return Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, c) != FALSE; };
-    mw2input::Raw r;
-    r.dt = dt;
-    r.mouse = Call<BOOL>(gta::IS_USING_KEYBOARD_AND_MOUSE, 2) != FALSE;
-    r.attack = pressed(kAttack, kVehAttack);
-    r.ads = pressed(kAim, kVehAim);
-    r.reload = pressed(kReload, kVehCinCam);
-    if (s.numberKeys)
-        for (int i = 0; i < 4; ++i)
-            if (tapped(input::kSlotKeys[i])) r.slot = i + 1;
-    r.nextWeapon = tapped(kWheelNext) || tapped(kWheelPrev) || tapped(kVehNextWeapon) || tapped(kVehPrevWeapon);
-    mapper_.SetMoveFlags(CV_MOVE_ON_GROUND);
-    CvMoveInput in = mapper_.Map(r, s.input, 0.0f, 0.0f);
-    in.forward = in.right = 0;
-    in.yaw_delta = in.pitch_delta = 0.0f;
-    in.third_person_range = 0.0f;
-    in.buttons &= CV_MW2_ATTACK | CV_MW2_ADS | CV_MW2_RELOAD;
-    CvMoveOutput out{};
-    runtime_.Mw2Step(in, out);
-}
-
-// F on the keyboard, read once a frame: fTap_ the knife this frame (every press, at once: sprinting, beside
-// cars). Holding it does nothing more.
-void Driver::EnterKey(DWORD /*now*/) {
+// F on the keyboard, read once a frame: fTap_ the knife this frame. Away from vehicles at once on the press
+// (sprinting too); with a vehicle around, a tap is the knife on its release and a hold of kHoldEnterMs enters
+// the vehicle looked at (fHoldEnter_, once a press; no knife then).
+void Driver::EnterKey(DWORD now, bool vehicleNear) {
+    constexpr DWORD kHoldEnterMs = 300;
     const bool down = Call<BOOL>(gta::IS_DISABLED_CONTROL_PRESSED, 0, kEnter) != FALSE;
-    fTap_ = down && !fDown_;
+    const bool pressed = down && !fDown_, released = !down && fDown_;
+    if (pressed) {
+        fDownAt_ = now;
+        fHoldUsed_ = false;
+    }
+    fTap_ = false;
+    if (!vehicleNear) {
+        fTap_ = pressed;
+        fHoldUsed_ = true; // this press was the knife: no hold to enter
+    } else if (down && !fHoldUsed_ && now - fDownAt_ >= kHoldEnterMs) {
+        fHoldEnter_ = true;
+        fHoldUsed_ = true;
+    } else if (released && !fHoldUsed_) {
+        fTap_ = true;
+    }
     fDown_ = down;
 }
 

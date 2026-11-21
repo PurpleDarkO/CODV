@@ -32,6 +32,8 @@ struct Frame {
     bool allowed = false;    // MW2 drives the player and no story mission runs
     bool stopEffects = false; // mode off or a story mission: end the UAV and EMP now
     bool modeOff = false;    // the mode was switched off this frame (the streak restarts)
+    bool deathCounts = true; // a death now is CODV's (the mode on, no story mission): the streak ends, the
+                             // kill counter counts it and MW2's "Round Over" shows
     bool menuOpen = false;
     std::uint16_t buttons = 0; // raw pad buttons
     std::uint32_t hostileKills = 0;
@@ -39,6 +41,7 @@ struct Frame {
     float dt = 0.0f;
     ksremote::Settings look;
     bool nukeKillsPlayer = false; // NukeKillsPlayer=1: MW2's nuke, its caller dies too
+    bool noNuke = false;          // a story mission without NukeInMissions: the Tactical Nuke is kept, not called in
 };
 
 void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log);
@@ -52,6 +55,8 @@ bool PoliceGrace();
 void GrantForTest(std::uint32_t reward);
 // A reward waits for action slot 4 (controls: the D-pad's right / INPUT_CONTEXT is ours then).
 bool Holding();
+// The player is at a care package (E held opens it, not GTA's interaction).
+bool AtCrate();
 // A killstreak has the view (the MW2 player waits; MW2 movement and gunplay pause).
 bool RemoteActive();
 // A killstreak is attacking now (its view, the helicopter, the sentry, the airstrike's jets, the nuke):

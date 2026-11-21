@@ -702,6 +702,27 @@ impl Gunner {
         }
     }
 
+    /// Scarce supplies (a run that starts short of everything): every carried gun keeps its magazine and
+    /// one spare, the frags and special grenades come down to one each.
+    pub fn scarce(&mut self, arsenal: &Arsenal) {
+        for (id, clip, stock) in &mut self.ammo {
+            let size = arsenal.gun(*id).unwrap().facts.clip_size.max(0);
+            *clip = (*clip).min(size);
+            *stock = (*stock).min(size);
+        }
+        let held = self.hands[0].weapon;
+        if let Some(&(_, c, s)) = self.ammo.iter().find(|a| a.0 == held) {
+            self.hands[0].clip = c;
+            self.hands[0].stock = s;
+        }
+        if let Some((_, n)) = self.frag.as_mut() {
+            *n = (*n).min(1);
+        }
+        if let Some((_, n)) = self.tactical.as_mut() {
+            *n = (*n).min(1);
+        }
+    }
+
     /// Each carried weapon's (id, clip, stock) and the frags carried.
     pub fn ammo_state(&self) -> (Vec<(u32, i32, i32)>, i32) {
         (self.ammo.clone(), self.frags())

@@ -3,6 +3,7 @@
 //! first use), one `codv_engine::viewmodel::Rig` for the held weapon, ticked
 //! after each `cv_mw2_step`; the host fetches the rig's mesh once per
 //! `mesh_id` and its bone matrices every frame (`cv_vm_*`).
+use crate::flash::{self, Flashes};
 use codv_engine::Mw2Player;
 use codv_engine::arms::GunFrame;
 use codv_engine::viewmodel::{self as v, Mesh, PlacementFacts, Rig, Timers};
@@ -102,6 +103,12 @@ impl Shared {
                     }
                 }
             }
+            // Its muzzle flash's sprites.
+            if !row.s("view_flash_fx").is_empty() {
+                for stem in flash::images(&self.0.dir.join("fx"), row.s("view_flash_fx")) {
+                    add("c", &stem);
+                }
+            }
         }
         out
     }
@@ -120,6 +127,11 @@ pub struct Viewmodels {
     weapon_mesh: HashMap<u32, u32>,
     next_mesh_id: u32,
     bones: Vec<[f32; 12]>,
+    /// MW2's view muzzle flashes, and where the held gun's comes out (its tag_flash, or tag_flash_silenced
+    /// with a silencer) with which effect.
+    flashes: Flashes,
+    flash_tag: Option<usize>,
+    flash_fx: String,
 }
 
 impl Viewmodels {
@@ -137,6 +149,7 @@ impl Viewmodels {
             .map(|r| (r.name.clone(), r.clone()))
             .collect::<HashMap<_, _>>();
         log(&format!("mw2: viewmodels for {} weapons in {}", rows.len(), dir.display()));
+        let flashes = Flashes::new(dir.join("fx"));
         Some(Viewmodels {
             disk: Arc::new(Disk { dir, rows, models: Mutex::default(), clips: Mutex::default() }),
             rig: None,
@@ -146,6 +159,9 @@ impl Viewmodels {
             weapon_mesh: HashMap::new(),
             next_mesh_id: 0,
             bones: Vec::new(),
+            flashes,
+            flash_tag: None,
+            flash_fx: String::new(),
         })
     }
 
@@ -211,6 +227,7 @@ impl Viewmodels {
     ) {
         if id == 0 {
             self.rig = None;
+            self.flashes.clear();
             return;
         }
         if self.rig.as_ref().is_none_or(|r| r.weapon != id) {
@@ -220,6 +237,11 @@ impl Viewmodels {
             }
             match self.build(id, name, dressed_as) {
                 Ok(rig) => {
+                    let row = self.disk.rows.get(name);
+                    let silenced = name.contains("silencer");
+                    self.flash_tag =
+                        silenced.then(|| rig.bone("tag_flash_silenced")).flatten().or_else(|| rig.bone("tag_flash"));
+                    self.flash_fx = row.map_or(String::new(), |r| r.s("view_flash_fx").to_owned());
                     let known = self.weapon_mesh.get(&id).copied().filter(|m| self.meshes.iter().any(|(k, _)| k == m));
                     if let Some(m) = known {
                         self.mesh_id = m;
@@ -251,8 +273,22 @@ impl Viewmodels {
         }
         if let Some(rig) = self.rig.as_mut() {
             rig.tick(player, frame, dt);
-            self.bones = rig.skin();
+            let tags: Vec<usize> = self.flash_tag.into_iter().collect();
+            let (bones, placed) = rig.skin_with_tags(&tags);
+            self.bones = bones;
+            // A shot of the gun in hand (not a grenade's throw view) flashes at its muzzle.
+            let fire = (frame.fired && frame.offhand_view.is_none() && !self.flash_fx.is_empty())
+                .then_some(self.flash_fx.as_str());
+            let ps = &player.ps;
+            let eye = [ps.origin[0], ps.origin[1], ps.origin[2] + ps.view_height_current];
+            let view = flash::view_to_world(eye, ps.viewangles);
+            self.flashes.tick(dt * 1000.0, placed.first().copied(), view, fire, log);
         }
+    }
+
+    /// The muzzle flash this frame: sprites in the view model's space and lights in MW2's world.
+    pub fn flash(&self) -> (Vec<flash::Quad>, Vec<flash::Light>) {
+        if self.rig.is_none() { (Vec::new(), Vec::new()) } else { self.flashes.draw() }
     }
 
     /// The notetracks the view model crossed since the last call (F5a sounds).
@@ -264,6 +300,7 @@ impl Viewmodels {
     pub fn reset(&mut self) {
         self.rig = None;
         self.bones.clear();
+        self.flashes.clear();
     }
 
     /// (mesh id, bones, ADS fraction, ADS zoom FOV) of the last tick.

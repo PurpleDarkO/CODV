@@ -448,6 +448,24 @@ fn scavenger_adds_a_magazine_up_to_the_limit() {
 }
 
 #[test]
+fn scarce_supplies_leave_one_spare_magazine() {
+    let mut rig = Rig::new(&table(), &["auto_mp", "semi_mp"]);
+    let before = rig.frames(0, 1).pop().unwrap();
+    assert!(before.stock > 10, "it starts with more than a magazine spare: {}", before.stock);
+    rig.gunner.scarce(&rig.arsenal);
+    let f = rig.frames(0, 1).pop().unwrap();
+    assert_eq!((f.clip, f.stock), (before.clip, 10), "the magazine kept, one spare");
+    // A pack found brings a magazine back; scarce again changes nothing more.
+    rig.gunner.scavenge(&rig.arsenal, 2);
+    assert_eq!(rig.frames(0, 1).pop().unwrap().stock, 20);
+    rig.gunner.scarce(&rig.arsenal);
+    assert_eq!(rig.frames(0, 1).pop().unwrap().stock, 10);
+    for (_, _, stock) in rig.gunner.ammo_state().0 {
+        assert!(stock <= 10, "every carried gun: {stock}");
+    }
+}
+
+#[test]
 fn a_mantle_and_a_jump_leave_the_gun_ready_with_its_magazine() {
     let mut rig = Rig::new(&table(), &["auto_mp", "semi_mp"]);
     rig.world.add(crate::world::SolidBox { mins: [120.0, -200.0, 0.0], maxs: [400.0, 200.0, 40.0] });

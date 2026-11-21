@@ -30,6 +30,8 @@ struct State {
     ksunits::Units units;
     std::uint32_t giveBack = 0; // a reward to return (the airstrike's target map cancelled)
     std::uint32_t testGive = 0; // the menu's test grant, handed over next frame
+    bool noNuke = false;        // Frame::noNuke of this frame
+    std::uint32_t noNukeSaidAt = 0;
     bool nukeWas = false;       // a nuke was inbound at the last step (its end starts the streak over)
     bool modeNuke = false;      // the nuke is a game mode's (kept while the mode stops the effects)
 } g;
@@ -124,7 +126,7 @@ void StopEffects() {
 bool Busy(std::uint32_t reward) {
     if (g.remote.Active()) return true;
     switch (reward) {
-    case CV_KS_NUKE: return g.units.NukeInbound();
+    case CV_KS_NUKE: return g.units.NukeInbound() || g.noNuke;
     default: return false;
     }
 }
@@ -216,7 +218,7 @@ void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log) {
     in.give = give;
     std::snprintf(in.key_label, sizeof(in.key_label), "4");
     if (f.enabled && f.allowed) in.flags |= CV_STREAK_ALLOWED;
-    if (died) in.flags |= CV_STREAK_DIED;
+    if (died && f.deathCounts) in.flags |= CV_STREAK_DIED;
     if (f.modeOff) in.flags |= CV_STREAK_RESET;
     // The nuke over (its blast's kills reported up to this call): the streak starts again.
     const bool nuke = g.units.NukeInbound();
@@ -224,7 +226,15 @@ void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log) {
     g.nukeWas = nuke;
     const bool key = Call<BOOL>(gta::IS_DISABLED_CONTROL_JUST_PRESSED, 0, ksrules::kActionSlotKey) != FALSE;
     // Nothing else is called in under a nuke: what is held then is cleared when it is over.
-    if (f.enabled && f.allowed && !f.menuOpen && !nuke && (key || (dpadPressed && g.held > 0)) && !Busy(g.top))
+    // A pad's D-pad right is GTA's while GTA shows a help message (a shop's prompt, controls::Suppressed).
+    const bool prompt = Call<BOOL>(gta::IS_HELP_MESSAGE_BEING_DISPLAYED) != FALSE;
+    g.noNuke = f.noNuke;
+    // No Tactical Nuke in a story mission (NukeInMissions=0): it stays held (the log says so, once a while).
+    if (g.noNuke && g.top == CV_KS_NUKE && key && Now() - g.noNukeSaidAt > 5000) {
+        g.noNukeSaidAt = Now();
+        util::Logf(log, "CODV: no Tactical Nuke in a story mission (NukeInMissions=0): it waits for free roam");
+    }
+    if (f.enabled && f.allowed && !f.menuOpen && !nuke && (key || (dpadPressed && g.held > 0 && !prompt)) && !Busy(g.top))
         in.flags |= CV_STREAK_ACTIVATE;
     CvStreakOutput out{};
     if (runtime.KillstreakStep(in, out)) {
@@ -255,6 +265,10 @@ void GrantForTest(std::uint32_t reward) {
 
 bool Holding() {
     return g.held > 0;
+}
+
+bool AtCrate() {
+    return g.units.AtCrate();
 }
 
 bool RemoteActive() {

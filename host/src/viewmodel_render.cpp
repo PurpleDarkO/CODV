@@ -6,7 +6,9 @@
 // pipeline state is saved before and restored after. The mesh, its images
 // and its index buffer are uploaded once per mesh id; each frame uploads the
 // bone palette (at most 256 bones, three float4 rows each) and draws the
-// opaque surfaces, then the blended ones without depth writes.
+// opaque surfaces, then the blended ones without depth writes, then the
+// sights' reticles, then MW2's muzzle flash sprites (tested against the
+// gun's depth, added or blended as their materials say).
 #include "viewmodel_render.h"
 
 #include "d3d11_saved_state.h"
@@ -156,6 +158,49 @@ float4 PsMain(VSOut i, bool front : SV_IsFrontFace) : SV_Target {
 }
 )";
 
+// MW2's muzzle flash: sprites (their colour already linear) over the gun, depth tested against it. The
+// constant buffer is the view model's (its first fields: proj, light, params).
+constexpr char kFxShaders[] = R"(
+cbuffer Frame : register(b0) {
+    row_major float4x4 proj;
+    float4 light;
+    float4 params; // y: sRGB target
+};
+struct FxIn { float3 pos : POSITION; float2 uv : TEXCOORD0; float4 col : COLOR0; float add : TEXCOORD1; };
+struct FxOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; float4 col : COLOR0; float add : TEXCOORD1; };
+Texture2D colorMap : register(t0);
+SamplerState samp : register(s0);
+float3 Encode(float3 c) {
+    c = saturate(c);
+    return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+}
+FxOut FxVs(FxIn i) {
+    FxOut o;
+    o.pos = mul(proj, float4(i.pos, 1));
+    o.uv = i.uv;
+    o.col = i.col;
+    o.add = i.add;
+    return o;
+}
+float4 FxPs(FxOut i) : SV_Target {
+    float4 t = colorMap.Sample(samp, i.uv);
+    float3 c = t.rgb * i.col.rgb;
+    float a = saturate(t.a * i.col.a);
+    // Added (ONE, ONE): its light, weighted by its alpha; else blended by it.
+    if (i.add > 0.5) c *= a;
+    if (params.y == 0) c = Encode(c);
+    return float4(c, i.add > 0.5 ? 0 : a);
+}
+)";
+struct FxVertex {
+    float pos[3];
+    float uv[2];
+    float col[4];
+    float add;
+};
+static_assert(sizeof(FxVertex) == 40);
+constexpr UINT kMaxFxQuads = 512;
+
 struct Constants {
     float proj[16];
     float light[4];
@@ -189,6 +234,11 @@ struct Gpu {
     ID3D11BlendState* opaque = nullptr;
     ID3D11BlendState* blend = nullptr;
     ID3D11BlendState* glow = nullptr; // the reticles (CV_VM_DRAW_EMISSIVE): light over what is behind
+    ID3D11BlendState* add = nullptr;  // the muzzle flash's added sprites (ONE, ONE)
+    ID3D11VertexShader* fxVs = nullptr;
+    ID3D11PixelShader* fxPs = nullptr;
+    ID3D11InputLayout* fxLayout = nullptr;
+    ID3D11Buffer* fxVb = nullptr; // kMaxFxQuads * 6 FxVertex, rewritten each frame
     ID3D11RasterizerState* raster = nullptr;
     ID3D11DepthStencilState* depthWrite = nullptr;
     ID3D11DepthStencilState* depthTest = nullptr;
@@ -351,6 +401,11 @@ void ReleaseAll() {
     SafeRelease(gpu.raster);
     SafeRelease(gpu.blend);
     SafeRelease(gpu.glow);
+    SafeRelease(gpu.add);
+    SafeRelease(gpu.fxVb);
+    SafeRelease(gpu.fxLayout);
+    SafeRelease(gpu.fxPs);
+    SafeRelease(gpu.fxVs);
     SafeRelease(gpu.opaque);
     SafeRelease(gpu.bones);
     SafeRelease(gpu.cb);
@@ -365,6 +420,109 @@ void ReleaseAll() {
 ID3DBlob* Compile(const char* entry, const char* profile) {
     return d3dstate::CompileShader(kShaders, sizeof(kShaders) - 1, "codv_viewmodel.hlsl", entry, profile, g_log,
                                    "CODV viewmodel");
+}
+
+ID3DBlob* CompileFx(const char* entry, const char* profile) {
+    return d3dstate::CompileShader(kFxShaders, sizeof(kFxShaders) - 1, "codv_muzzle_flash.hlsl", entry, profile, g_log,
+                                   "CODV muzzle flash");
+}
+
+// The muzzle flash's pipeline; without it the gun still draws (no flash).
+void CreateFxObjects(ID3D11Device* device) {
+    ID3DBlob* vs = CompileFx("FxVs", "vs_5_0");
+    ID3DBlob* ps = CompileFx("FxPs", "ps_5_0");
+    bool ok = vs && ps &&
+              SUCCEEDED(device->CreateVertexShader(vs->GetBufferPointer(), vs->GetBufferSize(), nullptr, &gpu.fxVs)) &&
+              SUCCEEDED(device->CreatePixelShader(ps->GetBufferPointer(), ps->GetBufferSize(), nullptr, &gpu.fxPs));
+    if (ok) {
+        const D3D11_INPUT_ELEMENT_DESC e[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, offsetof(FxVertex, pos), D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, offsetof(FxVertex, uv), D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, offsetof(FxVertex, col), D3D11_INPUT_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 1, DXGI_FORMAT_R32_FLOAT, 0, offsetof(FxVertex, add), D3D11_INPUT_PER_VERTEX_DATA, 0},
+        };
+        ok = SUCCEEDED(device->CreateInputLayout(e, 4, vs->GetBufferPointer(), vs->GetBufferSize(), &gpu.fxLayout));
+    }
+    SafeRelease(vs);
+    SafeRelease(ps);
+    if (ok) {
+        D3D11_BUFFER_DESC d{};
+        d.ByteWidth = kMaxFxQuads * 6 * sizeof(FxVertex);
+        d.Usage = D3D11_USAGE_DYNAMIC;
+        d.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+        d.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+        ok = SUCCEEDED(device->CreateBuffer(&d, nullptr, &gpu.fxVb));
+    }
+    if (ok) {
+        D3D11_BLEND_DESC b{};
+        auto& rt = b.RenderTarget[0];
+        rt.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED | D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
+        rt.BlendEnable = TRUE;
+        rt.SrcBlend = D3D11_BLEND_ONE;
+        rt.DestBlend = D3D11_BLEND_ONE;
+        rt.BlendOp = D3D11_BLEND_OP_ADD;
+        rt.SrcBlendAlpha = D3D11_BLEND_ZERO;
+        rt.DestBlendAlpha = D3D11_BLEND_ONE;
+        rt.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+        ok = SUCCEEDED(device->CreateBlendState(&b, &gpu.add));
+    }
+    if (!ok) {
+        Logf("CODV viewmodel: muzzle flash pass unavailable (D3D11 setup failed)");
+        SafeRelease(gpu.add);
+        SafeRelease(gpu.fxVb);
+        SafeRelease(gpu.fxLayout);
+        SafeRelease(gpu.fxPs);
+        SafeRelease(gpu.fxVs);
+    }
+}
+
+ID3D11ShaderResourceView* Upload(const dds::Texture& t, bool srgb);
+
+// MW2's muzzle flash over the gun (state: the view model's render target, depth, viewport and constants are
+// bound). Consecutive sprites with the same image and blend draw together.
+bool DrawFx(ID3D11DeviceContext* c, const std::vector<FxQuad>& fx) {
+    if (fx.empty() || !gpu.fxVs || !gpu.fxPs || !gpu.fxLayout || !gpu.fxVb || !gpu.add) return false;
+    const std::size_t n = std::min<std::size_t>(fx.size(), kMaxFxQuads);
+    D3D11_MAPPED_SUBRESOURCE m{};
+    if (FAILED(c->Map(gpu.fxVb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) return false;
+    auto* v = static_cast<FxVertex*>(m.pData);
+    // Two triangles per quad: corners 0 1 2 and 0 2 3, their atlas cell's corners.
+    constexpr int kOrder[6] = {0, 1, 2, 0, 2, 3};
+    for (std::size_t q = 0; q < n; ++q) {
+        const FxQuad& s = fx[q];
+        const float uv[4][2] = {{s.uv[0], s.uv[3]}, {s.uv[2], s.uv[3]}, {s.uv[2], s.uv[1]}, {s.uv[0], s.uv[1]}};
+        for (int k = 0; k < 6; ++k) {
+            FxVertex& o = v[q * 6 + k];
+            const int i = kOrder[k];
+            std::memcpy(o.pos, s.corners[i], sizeof(o.pos));
+            o.uv[0] = uv[i][0], o.uv[1] = uv[i][1];
+            std::memcpy(o.col, s.rgba, sizeof(o.col));
+            o.add = s.additive ? 1.0f : 0.0f;
+        }
+    }
+    c->Unmap(gpu.fxVb, 0);
+    const UINT stride = sizeof(FxVertex), offset = 0;
+    c->IASetInputLayout(gpu.fxLayout);
+    c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    c->IASetVertexBuffers(0, 1, &gpu.fxVb, &stride, &offset);
+    c->VSSetShader(gpu.fxVs, nullptr, 0);
+    c->PSSetShader(gpu.fxPs, nullptr, 0);
+    c->OMSetDepthStencilState(gpu.depthTest, 0);
+    const float factor[4] = {0, 0, 0, 0};
+    bool drawn = false;
+    for (std::size_t q = 0; q < n;) {
+        std::size_t end = q + 1;
+        while (end < n && fx[end].texture == fx[q].texture && fx[end].additive == fx[q].additive) ++end;
+        ID3D11ShaderResourceView* srv = fx[q].texture ? Upload(*fx[q].texture, true) : nullptr;
+        if (srv) {
+            c->OMSetBlendState(fx[q].additive ? gpu.add : gpu.blend, factor, 0xFFFFFFFFu);
+            c->PSSetShaderResources(0, 1, &srv);
+            c->Draw(static_cast<UINT>((end - q) * 6), static_cast<UINT>(q * 6));
+            drawn = true;
+        }
+        q = end;
+    }
+    return drawn;
 }
 
 bool Buffer(UINT bytes, UINT bind, D3D11_USAGE usage, const void* init, ID3D11Buffer*& out) {
@@ -467,6 +625,7 @@ bool CreateDeviceObjects(ID3D11Device* device) {
         ReleaseAll();
         gpu.failed = true;
     }
+    if (ok) CreateFxObjects(device);
     return ok;
 }
 
@@ -773,6 +932,13 @@ bool Present(IDXGISwapChain* sc, const Frame& frame) {
                 c->DrawIndexed(d.count, d.first, 0);
                 drawn = true;
             }
+        }
+        // The muzzle flash: the frame's projection and the target's encoding.
+        if (!frame.fx.empty() && SUCCEEDED(c->Map(gpu.cb, 0, D3D11_MAP_WRITE_DISCARD, 0, &m))) {
+            std::memcpy(m.pData, &k, sizeof(k));
+            c->Unmap(gpu.cb, 0);
+            c->PSSetConstantBuffers(0, 1, &gpu.cb);
+            drawn = DrawFx(c, frame.fx) || drawn;
         }
     }
     saved.Restore(c);

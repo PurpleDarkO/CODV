@@ -100,6 +100,8 @@ pub struct ViewmodelSummary {
     pub models: usize,
     pub anims: usize,
     pub images: usize,
+    /// View muzzle flash effects written (`viewmodels/fx/*.cfx`).
+    pub effects: usize,
     pub bytes: u64,
     pub missing_images: Vec<String>,
     pub missing_models: Vec<String>,
@@ -120,9 +122,9 @@ const BODY_ZONES: [&str; 4] = ["mp_rust.ff", "mp_terminal.ff", "mp_highrise.ff",
 
 /// Reads the first-person meshes, animations and images the holdable guns of
 /// `table` use from the player's MW2 (`zone/english/*.ff`, `main/iw_*.iwd`)
-/// into `out/viewmodels/{models,anims,images}`, and records on each gun its
-/// models, hidden tags and animation names (`gun_model`, `hand_model`,
-/// `hide_tags`, `xanim.<slot>`).
+/// into `out/viewmodels/{models,anims,images,fx}`, and records on each gun its
+/// models, hidden tags, animation names and view muzzle flash (`gun_model`,
+/// `hand_model`, `hide_tags`, `xanim.<slot>`, `view_flash_fx`).
 #[cfg(feature = "import")]
 pub fn import_viewmodels(
     mw2: &std::path::Path,
@@ -147,11 +149,14 @@ pub fn import_viewmodels(
         found.raw.extend(f.raw);
         found.weapon_notetracks.extend(f.weapon_notetracks);
         found.weapon_hud.extend(f.weapon_hud);
+        found.effects.extend(f.effects);
+        found.weapon_flash.extend(f.weapon_flash);
     }
     let models: HashMap<String, &vm::Model> = found.models.iter().map(|m| (m.name.to_ascii_lowercase(), m)).collect();
     let mut want_models = BTreeSet::new();
     let mut want_anims = BTreeSet::new();
     let mut want_images = BTreeSet::new();
+    let mut want_effects = BTreeSet::new();
     let mut summary = ViewmodelSummary { skipped_models: found.skipped.len(), ..Default::default() };
     let underbarrel = underbarrel_names(table);
     // Guns, the thrown frag-class grenades, CODV's equipment on the frag button and the special grenades on
@@ -167,8 +172,34 @@ pub fn import_viewmodels(
         let Some(wm) = found.weapon_models.get(&row.name) else { continue };
         let hands = if wm.hands.is_empty() { DEFAULT_HANDS.to_owned() } else { wm.hands.clone() };
         row.strings.retain(|(k, _)| {
-            k != "gun_model" && k != "hand_model" && k != "hide_tags" && k != "rocket_model" && !k.starts_with("xanim.")
+            k != "gun_model"
+                && k != "hand_model"
+                && k != "hide_tags"
+                && k != "rocket_model"
+                && k != "view_flash_fx"
+                && !k.starts_with("xanim.")
         });
+        // MW2's view muzzle flash (WeaponDef viewFlashEffect), with the effects its runners spawn.
+        if let Some(fx) = found.weapon_flash.get(&row.name)
+            && found.effects.contains_key(fx)
+        {
+            row.strings.push(("view_flash_fx".into(), fx.clone()));
+            let mut more = vec![fx.clone()];
+            while let Some(name) = more.pop() {
+                let Some(e) = found.effects.get(&name) else { continue };
+                if !want_effects.insert(name) {
+                    continue;
+                }
+                for x in &e.elems {
+                    more.extend(x.runs.iter().cloned());
+                    for m in &x.materials {
+                        if !m.color_map.is_empty() && !m.color_map.starts_with('$') {
+                            want_images.insert(m.color_map.to_ascii_lowercase());
+                        }
+                    }
+                }
+            }
+        }
         row.strings.push(("gun_model".into(), wm.gun.clone()));
         row.strings.push(("hand_model".into(), hands.clone()));
         row.strings.push(("hide_tags".into(), wm.hide_tags.join(",")));
@@ -222,7 +253,7 @@ pub fn import_viewmodels(
         want_images.insert(img);
     }
     let dir = out.join("viewmodels");
-    for sub in ["models", "anims", "images"] {
+    for sub in ["models", "anims", "images", "fx"] {
         std::fs::create_dir_all(dir.join(sub)).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     let write = |path: std::path::PathBuf, bytes: &[u8], summary: &mut ViewmodelSummary| -> Result<(), String> {
@@ -248,6 +279,14 @@ pub fn import_viewmodels(
             &mut summary,
         )?;
         summary.anims += 1;
+    }
+    for name in &want_effects {
+        write(
+            dir.join("fx").join(format!("{}.cfx", vm::file_stem(name))),
+            &vm::write_effect(&found.effects[name]),
+            &mut summary,
+        )?;
+        summary.effects += 1;
     }
     let images = iwd::Images::open(mw2)?;
     for name in &want_images {

@@ -50,6 +50,7 @@ public:
     void Tick(RuntimeBridge& runtime, Ped player, CvStreakView& view, std::uint32_t& give);
     void Stop();
     bool NukeInbound() const { return nuke_.on; }
+    bool AtCrate() const { return crate_.reach; }
     // A while after the nuke's blast no police are sent (the player may get away; the stars run out).
     bool PoliceGrace() const { return grace_; }
     // MW2's nuke kills its caller too (NukeKillsPlayer=1); CODV spares the player by default.
@@ -83,6 +84,7 @@ private:
         int blip = 0, flare = 0;
         std::uint32_t dropAt = 0, until = 0, holdSince = 0;
         std::uint32_t content = 0;
+        bool reach = false; // the player is at it (E held opens it)
     };
     struct Jet {
         Vehicle vehicle = 0;

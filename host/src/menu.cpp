@@ -84,6 +84,16 @@ std::string Upper(std::string s) {
     return s;
 }
 
+// The version in the header's corner (CMake reads it from the runtime crate; experimental builds say so).
+#ifndef CODV_VERSION
+#define CODV_VERSION "dev"
+#endif
+#if CODV_EXPERIMENTAL
+constexpr const char* kVersionLabel = "v" CODV_VERSION " exp";
+#else
+constexpr const char* kVersionLabel = "v" CODV_VERSION;
+#endif
+
 // The list, its header, the help for the selected item and the controls.
 void Draw(const Model& m) {
     const std::vector<int> v = m.Visible();
@@ -93,10 +103,11 @@ void Draw(const Model& m) {
     const int shown = std::min(n - first, kRows);
     const bool keyboard = Call<BOOL>(gta::IS_USING_KEYBOARD_AND_MOUSE, 2) != FALSE;
 
-    // Header: the CODV mark on black, a green rule under it.
+    // Header: the CODV mark on black, the version small in its corner, a green rule under it.
     float y = kTop;
     Rect(kLeft, y, kWidth, kHeaderH, kHeader);
     Text("CODV", kLeft + kWidth / 2, y + 0.006f, 1.05f, kFontPricedown, kAccent, Align::Centre);
+    Text(kVersionLabel, kLeft + kWidth - kPad, y + kHeaderH - 0.024f, 0.26f, kFontChalet, kDim, Align::Right);
     y += kHeaderH;
     Rect(kLeft, y, kWidth, 0.003f, kAccent);
     y += 0.003f;

@@ -9,14 +9,17 @@
 //!   `copy_delta_trans`);
 //! * materials and images: the texture table and GfxImage records
 //!   `fastfile_iw4` records, joined by asset slot as `asset_material`'s link
-//!   map does.
+//!   map does;
+//! * effects (the guns' view muzzle flashes): FxEffectDef and its FxElemDefs
+//!   as `fastfile_iw4`'s `load_fx` walks them, read field by field from the
+//!   IW4 x86 layout.
 //!
 //! iw4L is Apache-2.0 (NOTICE).
 use crate::vm;
 use asset_iw4::size as sz;
 use fastfile_iw4::{
-    AssetLinkSink, AssetSink, AssetType, Ptr, ScriptStrings, XAnimDeltaTransGeometry, XAnimPartsGeometry,
-    XModelGeometry, ZonePtr, ZoneStream,
+    AssetLinkSink, AssetSink, AssetType, FxEffectDefGeometry, Ptr, ScriptStrings, XAnimDeltaTransGeometry,
+    XAnimPartsGeometry, XModelGeometry, ZonePtr, ZoneStream,
 };
 use std::collections::HashMap;
 
@@ -59,6 +62,10 @@ pub struct Found {
     /// Weapon name -> the images of its hip crosshair (centre, side), ADS
     /// overlay (the scope) and HUD icon materials; "" where unset. Variants share them.
     pub weapon_hud: HashMap<String, [String; 4]>,
+    /// Effects by name (the guns' view muzzle flashes, FxEffectDef).
+    pub effects: HashMap<String, vm::Effect>,
+    /// Weapon name -> its view muzzle flash effect (WeaponDef viewFlashEffect); variants share it.
+    pub weapon_flash: HashMap<String, String>,
     pub skipped: Vec<String>,
     /// The character animation sources (playeranim::MULTIPLAYER_ANIMTREE_PATH,
     /// playeranim::PLAYERANIM_SCRIPT_PATH), inflated, by rawfile name.
@@ -79,9 +86,19 @@ struct Sink {
     defs: HashMap<Ptr, (String, String, String)>,
     notetrack_defs: HashMap<Ptr, Vec<(String, String)>>,
     hud_defs: HashMap<Ptr, [String; 4]>,
+    /// Effects captured, by asset slot (and header).
+    fx_slots: HashMap<Ptr, String>,
+    last_fx: Option<(String, Option<Ptr>)>,
+    flash_defs: HashMap<Ptr, String>,
     found: Found,
     /// XModel names by asset slot, for weapons naming models loaded earlier.
     xmodel_names: std::collections::HashMap<Ptr, Ptr>,
+}
+
+/// Sprite element types (their visuals are materials): billboard, oriented, tail, trail, cloud, spark cloud,
+/// spark fountain (asset_iw4 fx_elem::is_sprite).
+fn vm_sprite(kind: u8) -> bool {
+    kind <= vm::fx_kind::SPARK_FOUNTAIN
 }
 
 // MaterialTextureDef semantics (TS_*).
@@ -267,6 +284,125 @@ impl Sink {
         }
         self.materials.push(MaterialRec { material });
         Some(self.materials.len() - 1)
+    }
+
+    fn material_at(&self, s: &ZoneStream<'_>, slot: Ptr) -> Option<vm::Material> {
+        let i = self.material_slots.get(&slot).or_else(|| match s.ptr_at(slot, 0) {
+            Ok(ZonePtr::Offset(p)) => {
+                self.material_slots.get(&p).or_else(|| self.material_slots.get(&s.resolve_alias(p)))
+            }
+            _ => None,
+        })?;
+        Some(self.materials[*i].material.clone())
+    }
+
+    /// One FxElemDef (IW4 x86: 252 bytes; asset_iw4::size::FX_ELEM_DEF).
+    fn fx_elem(&self, s: &ZoneStream<'_>, p: Ptr, category: u8) -> Option<vm::FxElem> {
+        let f = |off: usize| s.f32_at(p, off).unwrap_or(0.0);
+        let i = |off: usize| s.i32_at(p, off).unwrap_or(0);
+        let range = |off: usize| [f(off), f(off + 4)];
+        let ranges3 = |off: usize| [range(off), range(off + 8), range(off + 16)];
+        let kind = s.u8_at(p, 176).ok()?;
+        let visual_count = s.u8_at(p, 177).ok()? as usize;
+        let vel_count = s.u8_at(p, 178).ok()? as usize + 1;
+        let vis_count = s.u8_at(p, 179).ok()? as usize + 1;
+        let array = |off: usize| match s.ptr_at(p, off) {
+            Ok(ZonePtr::Offset(q)) => Some(s.resolve_alias(q)),
+            _ => None,
+        };
+        let mut motion = Vec::new();
+        if let Some(a) = array(180) {
+            for k in 0..vel_count {
+                let v = |off: usize| {
+                    let b = k * sz::FX_ELEM_VEL_STATE_SAMPLE + off;
+                    [
+                        s.f32_at(a, b).unwrap_or(0.0),
+                        s.f32_at(a, b + 4).unwrap_or(0.0),
+                        s.f32_at(a, b + 8).unwrap_or(0.0),
+                    ]
+                };
+                motion.push(vm::FxMotion {
+                    local_velocity: [v(0), v(12)],
+                    local_delta: [v(24), v(36)],
+                    world_velocity: [v(48), v(60)],
+                    world_delta: [v(72), v(84)],
+                });
+            }
+        }
+        let mut visuals = Vec::new();
+        if let Some(a) = array(184) {
+            for k in 0..vis_count {
+                let one = |off: usize| {
+                    let b = k * sz::FX_ELEM_VIS_STATE_SAMPLE + off;
+                    let g = |o: usize| s.f32_at(a, b + o).unwrap_or(0.0);
+                    let mut color = [0u8; 4];
+                    for (c, x) in color.iter_mut().enumerate() {
+                        *x = s.u8_at(a, b + c).unwrap_or(0);
+                    }
+                    vm::FxVisual {
+                        color,
+                        rotation_delta: g(4),
+                        rotation_total: g(8),
+                        size: [g(12), g(16)],
+                        scale: g(20),
+                    }
+                };
+                visuals.push([one(0), one(24)]);
+            }
+        }
+        let mut materials = Vec::new();
+        if vm_sprite(kind) {
+            if visual_count > 1 {
+                if let Some(a) = array(188) {
+                    materials.extend((0..visual_count).filter_map(|k| self.material_at(s, a.at(k * 4))));
+                }
+            } else if visual_count == 1 {
+                materials.extend(self.material_at(s, p.at(188)));
+            }
+        }
+        let mut runs = Vec::new();
+        if kind == vm::fx_kind::RUNNER {
+            let name = |slot: Ptr| match s.ptr_at(slot, 0) {
+                Ok(ZonePtr::Offset(q)) => ascii_name(s, Some(s.resolve_alias(q))),
+                _ => None,
+            };
+            if visual_count > 1 {
+                if let Some(a) = array(188) {
+                    runs.extend((0..visual_count).filter_map(|k| name(a.at(k * 4))));
+                }
+            } else if visual_count == 1 {
+                runs.extend(name(p.at(188)));
+            }
+        }
+        let mut atlas = [0u8; 6];
+        for (k, x) in atlas.iter_mut().enumerate() {
+            *x = s.u8_at(p, 168 + k).unwrap_or(0);
+        }
+        Some(vm::FxElem {
+            kind,
+            flags: s.u32_at(p, 0).unwrap_or(0),
+            category,
+            spawn: [i(4), i(8)],
+            fade_in: range(20),
+            fade_out: range(28),
+            delay_ms: [i(40), i(44)],
+            life_ms: [i(48), i(52)],
+            origin: ranges3(56),
+            offset_radius: range(80),
+            offset_height: range(88),
+            angles: ranges3(96),
+            angular_velocity: ranges3(120),
+            initial_rotation: range(144),
+            gravity: range(152),
+            atlas,
+            atlas_entries: s.u16_at(p, 174).unwrap_or(0),
+            motion,
+            visuals,
+            materials,
+            runs,
+            sort_order: s.u8_at(p, 248).unwrap_or(0),
+            lighting_frac: s.u8_at(p, 249).unwrap_or(0),
+        })
     }
 
     fn capture_image(&mut self, s: &ZoneStream<'_>) -> Option<usize> {
@@ -510,6 +646,13 @@ impl AssetLinkSink for Sink {
                     }
                 }
             }
+            AssetType::Fx => {
+                if let Some((name, header)) = self.last_fx.take() {
+                    for p in [Some(slot), insert, header].into_iter().flatten() {
+                        self.fx_slots.insert(p, name.clone());
+                    }
+                }
+            }
             AssetType::XModel => {
                 if let Some(g) = s.xmodel() {
                     match self.capture_model(s, g) {
@@ -608,6 +751,30 @@ impl AssetLinkSink for Sink {
                     }
                 }
                 if let Some(g) = s.weapon()
+                    && let Some(name) = ascii_name(s, g.name)
+                {
+                    let fx = g.view_flash_slot.and_then(|slot| {
+                        self.fx_slots.get(&slot).cloned().or_else(|| match s.ptr_at(slot, 0) {
+                            Ok(ZonePtr::Offset(p)) => {
+                                self.fx_slots.get(&p).or_else(|| self.fx_slots.get(&s.resolve_alias(p))).cloned()
+                            }
+                            _ => None,
+                        })
+                    });
+                    let fx = match fx {
+                        Some(fx) => {
+                            if let Some(def) = g.weap_def {
+                                self.flash_defs.insert(def, fx.clone());
+                            }
+                            Some(fx)
+                        }
+                        None => g.weap_def.and_then(|d| self.flash_defs.get(&d).cloned()),
+                    };
+                    if let Some(fx) = fx {
+                        self.found.weapon_flash.insert(name, fx);
+                    }
+                }
+                if let Some(g) = s.weapon()
                     && let (Some(name), Some(arr)) = (ascii_name(s, g.name), g.sz_xanims)
                 {
                     let anims = (0..sz::WEAPON_ANIM_COUNT)
@@ -636,6 +803,12 @@ impl AssetLinkSink for Sink {
     }
 
     fn alias(&mut self, ty: AssetType, slot: Ptr, target: Ptr) -> fastfile_iw4::Result<()> {
+        if ty == AssetType::Fx {
+            if let Some(name) = self.fx_slots.get(&target).cloned() {
+                self.fx_slots.insert(slot, name);
+            }
+            return Ok(());
+        }
         let map = match ty {
             AssetType::Image => &mut self.image_slots,
             AssetType::Material => &mut self.material_slots,
@@ -661,6 +834,32 @@ impl AssetLinkSink for Sink {
                 self.found.raw.insert(name.to_owned(), bytes);
             }
         }
+        Ok(())
+    }
+
+    fn capture_fx(&mut self, s: &ZoneStream<'_>, g: FxEffectDefGeometry) -> fastfile_iw4::Result<()> {
+        self.last_fx = None;
+        let Some(name) = ascii_name(s, g.name) else { return Ok(()) };
+        let looping = g.looping_count.max(0) as usize;
+        let one_shot = g.one_shot_count.max(0) as usize;
+        let mut elems = Vec::new();
+        if let Some(arr) = g.elem_defs {
+            for k in 0..g.elem_def_count {
+                let category = if k < looping {
+                    0
+                } else if k < looping + one_shot {
+                    1
+                } else {
+                    2
+                };
+                if let Some(e) = self.fx_elem(s, arr.at(k * sz::FX_ELEM_DEF), category) {
+                    elems.push(e);
+                }
+            }
+        }
+        let looping_life_ms = s.i32_at(g.header, 12).unwrap_or(0);
+        self.found.effects.insert(name.clone(), vm::Effect { name: name.clone(), looping_life_ms, elems });
+        self.last_fx = Some((name, Some(g.header)));
         Ok(())
     }
 
@@ -726,6 +925,9 @@ pub fn capture(image: &[u8]) -> Result<Found, String> {
         defs: HashMap::new(),
         notetrack_defs: HashMap::new(),
         hud_defs: HashMap::new(),
+        fx_slots: HashMap::new(),
+        last_fx: None,
+        flash_defs: HashMap::new(),
         xmodel_names: HashMap::new(),
         found: Found::default(),
     };

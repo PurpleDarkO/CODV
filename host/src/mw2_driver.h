@@ -36,6 +36,10 @@ struct Settings {
     bool autoLadder = true;
     // GTA's own footsteps (not MW2's): the ped's feet, animated with MW2's run, drive GTA's step sounds.
     bool gtaFootsteps = true;
+    // A vehicle is for getting about only (the zombie modes; controls::SeatRules): GTA's third person from the
+    // walk to its door on. Off (Free Roam): GTA's first person on the way to the door, and in the seat GTA's
+    // own camera, weapons and radio as the player has them.
+    bool seatRules = false;
 };
 
 // The camera the shots leave from while MW2 drives.
@@ -62,15 +66,17 @@ public:
     void FreezeInput(bool on) { inputFrozen_ = on; }
     // The pad's raw buttons this frame (XInput): D-pad left throws MW2's special grenade on a pad.
     void SetPadButtons(std::uint16_t b) { padButtons_ = b; }
+    // E held is not GTA's interaction now (at a care package E is held to open it; on a pad D-pad right
+    // calls in a waiting reward).
+    void SetInteractBlocked(bool on) { interactBlocked_ = on; }
     bool Active() const { return active_; }
     // GTA has the player only for a ladder or a skydive: MW2's HUD stays on screen.
     bool Borrowed() const { return borrowed_; }
-    // GTA has the player for a vehicle (entering, inside, getting out): MW2's HUD stays, without the gun's.
+    // GTA has the player for a vehicle (entering, inside, getting out): CODV steps aside, GTA's camera, HUD,
+    // body and weapons (MW2's player, gun and magazine wait for the way out).
     bool InVehicle() const { return borrowed_ && inVehicle_; }
-    // In a vehicle (or on the way in or out) with GTA's camera in first person: MW2's gun shows, GTA's body is hidden.
-    bool VehicleFirstPerson() const { return InVehicle() && vehicleFirstPerson_; }
-    // MW2's gun fires from a vehicle's seat this frame (the gunplay shoots from GTA's camera, past the vehicle).
-    bool SeatedGun() const { return InVehicle() && seatedGun_; }
+    // Back from a vehicle: GTA's camera is still easing into MW2's eye (no view model until it is there).
+    bool EasingIn(DWORD now) const { return easeInUntil_ && static_cast<int>(easeInUntil_ - now) > 0; }
     // GTA has the player for a moment to see whether there is a ladder (not climbing one yet): MW2's
     // gun and crosshair stay on screen.
     bool LadderTrying() const { return borrowed_ && !climbing_ && !inVehicle_; }
@@ -102,8 +108,8 @@ private:
     // The ped and its gun fully transparent (first person) or back to normal.
     void SetHidden(Ped player, Entity gun, bool hide);
     static void HideGtaHud();
-    void EnterKey(DWORD now);
-    void SeatedGun(const Settings& s, float dt);
+    // F on the keyboard: `vehicleNear` a vehicle is around (a tap is the knife on release, a hold enters it).
+    void EnterKey(DWORD now, bool vehicleNear);
 
     // One movement event for the debug panel (and the log while the panel is on).
     void Note(DWORD now, const char* fmt, ...);
@@ -144,17 +150,32 @@ private:
     DWORD enterAt_ = 0;
     DWORD leaveUntil_ = 0;        // just out of a vehicle: GTA keeps the player until then
     bool seated_ = false;         // in the vehicle's seat this frame (not getting in or out)
-    bool vehicleFirstPerson_ = false; // a vehicle borrow with GTA's camera in first person (body hidden)
-    bool seatedGun_ = false;          // MW2's gun fires from the vehicle's seat
     // F on the keyboard: down last frame; this frame's knife tap.
     bool fDown_ = false, fTap_ = false;
+    DWORD fDownAt_ = 0;     // when F went down
+    bool fHoldEnter_ = false; // F held long enough at a vehicle: enter it (once a press)
+    bool fHoldUsed_ = false;  // this press entered a vehicle (no knife on its release)
     int easeCam_ = 0;             // MW2's camera easing into GTA's (destroyed after easeCamUntil_)
     DWORD easeCamUntil_ = 0;
     bool easeIn_ = false;         // the way back from a vehicle eases GTA's camera into MW2's
+    DWORD easeInUntil_ = 0;       // that ease lasts until then
+    bool seatRules_ = false;      // Settings::seatRules of the last Tick
     float roll_ = 0.0f;           // the camera's slide tilt, degrees
     DWORD surfaceAt_ = 0;         // when the ground's material is read next (MW2's footsteps)
     int surface_ = 0;             // the ground's surface told to the runtime
     bool skydive_ = false;        // GTA has a long fall with a parachute (MW2 back on the ground)
+    // A mission's weapon (controls::SlotForGtaGroup): the ped and GTA weapon when MW2 last let go, the slot asked
+    // for next frame.
+    Ped releasedPed_ = 0;
+    Hash releasedWeapon_ = 0;
+    int pendingSlot_ = 0;
+    bool releasedBorrowed_ = false;
+    DWORD skydiveAt_ = 0;         // when it began, and where (a bounce: controls::Bounces)
+    float skydiveFrom_[3] = {};
+    int bounces_ = 0;
+    bool footing_ = false;        // GTA keeps the player where MW2 finds no ground (controls::FootingOver)
+    DWORD footingAt_ = 0;
+    float footingFrom_[3] = {};
     const char* lastWhy_ = "";
     CvMoveOutput last_{};
     View view_{};
@@ -162,6 +183,15 @@ private:
     bool thirdPerson_ = false, thirdPersonSet_ = false;
     bool inputFrozen_ = false;
     std::uint16_t padButtons_ = 0;
+    // GTA's interactions (controls::InteractOver): E held hands the player to GTA.
+    bool interactBlocked_ = false;
+    bool eDown_ = false;
+    DWORD eDownAt_ = 0;
+    DWORD interactUntil_ = 0, interactCap_ = 0, interactSeen_ = 0; // 0: none
+    float interactAt_[3] = {};
+    bool interactTaken_ = false;
+    bool interactAsked_ = false; // this press of E was looked at (a shop here or not)
+    int interactMisses_ = 0;     // E held outside a shop (the log, the first few)
     bool altPadHeld_ = false; // D-pad down held last frame (the underbarrel switch fires on the press)
     bool hidden_ = false;
     Entity hiddenGun_ = 0;

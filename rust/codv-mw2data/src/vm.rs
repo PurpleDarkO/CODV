@@ -461,6 +461,223 @@ pub fn read_anim(b: &[u8]) -> Res<Anim> {
     Ok(a)
 }
 
+// ---- effects ----------------------------------------------------------------
+
+/// `fx/<name>.cfx`: one FxEffectDef (a gun's view muzzle flash), its elements as IW4's FxElemDef holds
+/// them. Distances are inches in the effect's frame (MW2's: X along the barrel, Y left, Z up); times
+/// milliseconds; every range is `base + amplitude * random(0..1)`.
+pub const EFFECT_MAGIC: &[u8; 4] = b"CFX1";
+
+/// FxElemType values the runtime knows.
+pub mod fx_kind {
+    pub const BILLBOARD: u8 = 0;
+    pub const ORIENTED: u8 = 1;
+    pub const TAIL: u8 = 2;
+    pub const TRAIL: u8 = 3;
+    pub const CLOUD: u8 = 4;
+    pub const SPARK_CLOUD: u8 = 5;
+    pub const SPARK_FOUNTAIN: u8 = 6;
+    pub const MODEL: u8 = 7;
+    pub const OMNI_LIGHT: u8 = 8;
+    pub const SPOT_LIGHT: u8 = 9;
+    pub const SOUND: u8 = 10;
+    pub const DECAL: u8 = 11;
+    pub const RUNNER: u8 = 12;
+}
+
+/// One FxElemVisualState (a sample's base or amplitude).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FxVisual {
+    pub color: [u8; 4],
+    pub rotation_delta: f32,
+    pub rotation_total: f32,
+    pub size: [f32; 2],
+    pub scale: f32,
+}
+
+/// One FxElemVelStateSample: velocity and the displacement so far (base, amplitude), in the effect's
+/// frame (`local`) and the world's (`world`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FxMotion {
+    pub local_velocity: [[f32; 3]; 2],
+    pub local_delta: [[f32; 3]; 2],
+    pub world_velocity: [[f32; 3]; 2],
+    pub world_delta: [[f32; 3]; 2],
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FxElem {
+    pub kind: u8,
+    pub flags: u32,
+    /// 0 looping, 1 one-shot, 2 emitted (by another element).
+    pub category: u8,
+    /// Looping: interval (ms) and count; one-shot: count base and amplitude.
+    pub spawn: [i32; 2],
+    pub fade_in: [f32; 2],
+    pub fade_out: [f32; 2],
+    pub delay_ms: [i32; 2],
+    pub life_ms: [i32; 2],
+    pub origin: [[f32; 2]; 3],
+    pub offset_radius: [f32; 2],
+    pub offset_height: [f32; 2],
+    pub angles: [[f32; 2]; 3],
+    pub angular_velocity: [[f32; 2]; 3],
+    pub initial_rotation: [f32; 2],
+    pub gravity: [f32; 2],
+    /// FxElemAtlas: behaviour, start index, frames per second, loop count, column bits, row bits.
+    pub atlas: [u8; 6],
+    pub atlas_entries: u16,
+    pub motion: Vec<FxMotion>,
+    /// (base, amplitude) per sample, spread evenly over the life.
+    pub visuals: Vec<[FxVisual; 2]>,
+    /// The sprite's materials (one picked at random per particle); none for lights.
+    pub materials: Vec<Material>,
+    /// A runner's effects (one picked at random), by name: spawned where the runner is.
+    pub runs: Vec<String>,
+    pub sort_order: u8,
+    pub lighting_frac: u8,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Effect {
+    pub name: String,
+    pub looping_life_ms: i32,
+    pub elems: Vec<FxElem>,
+}
+
+pub fn write_effect(e: &Effect) -> Vec<u8> {
+    let mut w = W::default();
+    w.0.extend_from_slice(EFFECT_MAGIC);
+    w.str(&e.name);
+    w.u32(e.looping_life_ms as u32);
+    w.len(e.elems.len());
+    for x in &e.elems {
+        w.u8(x.kind);
+        w.u32(x.flags);
+        w.u8(x.category);
+        for v in [x.spawn, x.delay_ms, x.life_ms] {
+            w.u32s(&[v[0] as u32, v[1] as u32]);
+        }
+        w.f32s(&x.fade_in);
+        w.f32s(&x.fade_out);
+        for r in x.origin.iter().chain(&x.angles).chain(&x.angular_velocity) {
+            w.f32s(r);
+        }
+        for r in [x.offset_radius, x.offset_height, x.initial_rotation, x.gravity] {
+            w.f32s(&r);
+        }
+        w.0.extend_from_slice(&x.atlas);
+        w.u16(x.atlas_entries);
+        w.len(x.motion.len());
+        for m in &x.motion {
+            for v in [m.local_velocity, m.local_delta, m.world_velocity, m.world_delta] {
+                w.f32s(&v[0]);
+                w.f32s(&v[1]);
+            }
+        }
+        w.len(x.visuals.len());
+        for pair in &x.visuals {
+            for v in pair {
+                w.0.extend_from_slice(&v.color);
+                w.f32s(&[v.rotation_delta, v.rotation_total, v.size[0], v.size[1], v.scale]);
+            }
+        }
+        w.len(x.materials.len());
+        for m in &x.materials {
+            write_material(&mut w, m);
+        }
+        w.len(x.runs.len());
+        for n in &x.runs {
+            w.str(n);
+        }
+        w.u8(x.sort_order);
+        w.u8(x.lighting_frac);
+    }
+    w.0
+}
+
+pub fn read_effect(b: &[u8]) -> Res<Effect> {
+    let mut r = R { b, at: 0 };
+    r.magic(EFFECT_MAGIC)?;
+    let name = r.str()?;
+    let looping_life_ms = r.u32()? as i32;
+    let n = r.len(64)?;
+    let mut elems = Vec::with_capacity(n);
+    for _ in 0..n {
+        let kind = r.u8()?;
+        let flags = r.u32()?;
+        let category = r.u8()?;
+        let mut ints = [[0i32; 2]; 3];
+        for v in &mut ints {
+            *v = [r.u32()? as i32, r.u32()? as i32];
+        }
+        let fade_in = r.f32a()?;
+        let fade_out = r.f32a()?;
+        let mut ranges = [[0.0f32; 2]; 9];
+        for v in &mut ranges {
+            *v = r.f32a()?;
+        }
+        let mut more = [[0.0f32; 2]; 4];
+        for v in &mut more {
+            *v = r.f32a()?;
+        }
+        let mut atlas = [0u8; 6];
+        atlas.copy_from_slice(r.take(6)?);
+        let atlas_entries = r.u16()?;
+        let m = r.len(96)?;
+        let mut motion = Vec::with_capacity(m);
+        for _ in 0..m {
+            let mut v = [[[0.0f32; 3]; 2]; 4];
+            for pair in &mut v {
+                pair[0] = r.f32a()?;
+                pair[1] = r.f32a()?;
+            }
+            motion.push(FxMotion { local_velocity: v[0], local_delta: v[1], world_velocity: v[2], world_delta: v[3] });
+        }
+        let k = r.len(48)?;
+        let mut visuals = Vec::with_capacity(k);
+        for _ in 0..k {
+            let mut pair = [FxVisual::default(); 2];
+            for v in &mut pair {
+                v.color.copy_from_slice(r.take(4)?);
+                let f: [f32; 5] = r.f32a()?;
+                (v.rotation_delta, v.rotation_total, v.size, v.scale) = (f[0], f[1], [f[2], f[3]], f[4]);
+            }
+            visuals.push(pair);
+        }
+        let count = r.len(16)?;
+        let materials = (0..count).map(|_| read_material(&mut r)).collect::<Res<Vec<_>>>()?;
+        let count = r.len(4)?;
+        let runs = (0..count).map(|_| r.str()).collect::<Res<Vec<_>>>()?;
+        elems.push(FxElem {
+            kind,
+            flags,
+            category,
+            spawn: ints[0],
+            fade_in,
+            fade_out,
+            delay_ms: ints[1],
+            life_ms: ints[2],
+            origin: [ranges[0], ranges[1], ranges[2]],
+            angles: [ranges[3], ranges[4], ranges[5]],
+            angular_velocity: [ranges[6], ranges[7], ranges[8]],
+            offset_radius: more[0],
+            offset_height: more[1],
+            initial_rotation: more[2],
+            gravity: more[3],
+            atlas,
+            atlas_entries,
+            motion,
+            visuals,
+            materials,
+            runs,
+            sort_order: r.u8()?,
+            lighting_frac: r.u8()?,
+        });
+    }
+    Ok(Effect { name, looping_life_ms, elems })
+}
+
 /// A file name for an asset name (MW2 names are plain; anything odd is replaced).
 pub fn file_stem(name: &str) -> String {
     name.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') { c } else { '_' }).collect()
@@ -523,5 +740,43 @@ mod tests {
         assert_eq!(read_anim(&write_anim(&a)).unwrap(), a);
         assert!(read_anim(b"CVA1").is_err());
         assert_eq!(file_stem("a/b c"), "a_b_c");
+    }
+
+    #[test]
+    fn effects_round_trip() {
+        let e = Effect {
+            name: "muzzleflashes/m4m203_flash_view".into(),
+            looping_life_ms: 0,
+            elems: vec![FxElem {
+                kind: fx_kind::BILLBOARD,
+                flags: 0x12,
+                category: 1,
+                spawn: [2, 1],
+                fade_in: [0.0, 0.1],
+                fade_out: [0.5, 0.2],
+                delay_ms: [0, 10],
+                life_ms: [50, 25],
+                origin: [[1.0, 0.5], [0.0, 0.0], [-0.5, 1.0]],
+                gravity: [0.0, 0.0],
+                atlas: [1, 0, 30, 0, 1, 1],
+                atlas_entries: 4,
+                motion: vec![FxMotion { local_delta: [[1.0, 2.0, 3.0], [0.5, 0.0, 0.0]], ..Default::default() }; 2],
+                visuals: vec![[
+                    FxVisual { color: [255, 200, 100, 255], size: [2.0, 3.0], scale: 1.0, ..Default::default() },
+                    FxVisual::default(),
+                ]],
+                materials: vec![Material {
+                    name: "muzzle".into(),
+                    color_map: "fx_muzzle".into(),
+                    ..Default::default()
+                }],
+                runs: vec!["muzzleflashes/other".into()],
+                sort_order: 5,
+                lighting_frac: 0,
+                ..Default::default()
+            }],
+        };
+        assert_eq!(read_effect(&write_effect(&e)).unwrap(), e);
+        assert!(read_effect(b"CFX1").is_err());
     }
 }

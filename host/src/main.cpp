@@ -38,6 +38,8 @@
 #include "tactical_rules.h"
 #include "tracers.h"
 #include "minimap_rules.h"
+#include "mission_log.h"
+#include "doors.h"
 #include "radar_box.h"
 #include "viewmodel_feed.h"
 
@@ -114,6 +116,10 @@ struct Config {
     // The view model's light (ViewmodelLight): 0 fixed daylight, 1 GTA's clock, 2 the scene behind the gun
     // (with the clock; the default).
     int viewmodelLight = 2;
+    // MW2's muzzle flash on the gun and its light on the world (MuzzleFlash), and how strong it shows
+    // (MuzzleFlashStrength: 1 MW2's own; a little softer by default).
+    bool muzzleFlash = true;
+    float muzzleFlashStrength = 0.6f;
     // MW2's gun over GTA's radar (GunOverRadar): 0 drawn over it, 1 a faint ghost under it (the default),
     // 2 hidden under it.
     int gunOverRadar = 1;
@@ -175,6 +181,8 @@ struct Config {
     bool spacedKillstreaks = true; // CODV's spaced kill counts (nuke 35); off: MW2's (nuke 25)
     bool allKillstreaks = true;   // every killstreak at its kill count (CODV); off: the three picks (MW2)
     bool keepKillstreaks = false; // unused killstreaks survive a death (MW2); off: a death loses them
+    bool killstreaksInMissions = false; // killstreaks in story missions too (a real risk: a strike may fail one)
+    bool nukeInMissions = false;        // with them, the Tactical Nuke there too (off: it waits for free roam)
     bool nukeKillsPlayer = false; // the Tactical Nuke kills the player too (MW2); off: CODV spares the player
     bool jumpSlowdown = false; // MW2's (off: a landing keeps the speed)
     bool reloadSprint = true;  // reload while sprinting (a little slower); off: the sprint waits for the reload
@@ -240,6 +248,8 @@ Config LoadConfig() {
     c.mw2.showBody = util::IniFlag(ini, "ShowBody", c.mw2.showBody);
     c.viewmodel = util::IniFlag(ini, "Viewmodel", c.viewmodel);
     c.viewmodelLight = std::clamp(static_cast<int>(util::IniFloat(ini, "ViewmodelLight", static_cast<float>(c.viewmodelLight))), 0, 2);
+    c.muzzleFlash = util::IniFlag(ini, "MuzzleFlash", c.muzzleFlash);
+    c.muzzleFlashStrength = std::clamp(util::IniFloat(ini, "MuzzleFlashStrength", c.muzzleFlashStrength), 0.1f, 1.5f);
     c.gunOverRadar = std::clamp(static_cast<int>(util::IniFloat(ini, "GunOverRadar", static_cast<float>(c.gunOverRadar))), 0, 2);
     c.minimapFollowsView = util::IniFlag(ini, "MinimapFollowsView", c.minimapFollowsView);
     c.bodyPose = util::IniFlag(ini, "BodyPose", c.bodyPose);
@@ -289,6 +299,8 @@ Config LoadConfig() {
     c.playMode = experimental::FirstPlayMode(c.gameMode);
 #endif
     c.killstreaks = util::IniFlag(ini, "Killstreaks", c.killstreaks);
+    c.killstreaksInMissions = util::IniFlag(ini, "KillstreaksInMissions", c.killstreaksInMissions);
+    c.nukeInMissions = util::IniFlag(ini, "NukeInMissions", c.nukeInMissions);
     c.scavenger = util::IniFlag(ini, "Scavenger", c.scavenger);
     c.allKillstreaks = util::IniFlag(ini, "AllKillstreaks", c.allKillstreaks);
     c.spacedKillstreaks = util::IniFlag(ini, "SpacedKillstreaks", c.spacedKillstreaks);
@@ -421,6 +433,8 @@ void ApplyOptions(const Config& c) {
 // (granted, never auto-equipped) and picking it turns the mode on. True on the frame it
 // becomes the selected weapon.
 constexpr Hash kWheelItem = util::Joaat("WEAPON_CODV_MW2");
+// MW2's muzzle flash light (its omni light's scale, 1.5 on a rifle) to DRAW_LIGHT_WITH_RANGE's intensity.
+constexpr float kFlashLightScale = 8.0f;
 
 struct WheelItem {
     DWORD grantAt = 0;
@@ -526,6 +540,8 @@ const Description kDescriptions[] = {
     {"KillCounter", "Kill counter", "Kills, streak and deaths in MW2's score bar (Free Roam)."},
     {"Mw2Blood", "MW2 blood", "MW2's blood on the screen as your health drops."},
     {"ViewmodelLight", "Gun lighting", "Hands and gun: fixed daylight, GTA's time of day, or the light around you."},
+    {"MuzzleFlash", "Muzzle flash", "MW2's muzzle flash on every shot, lighting up what is around you."},
+    {"MuzzleFlashStrength", "Muzzle flash strength", "How bright the muzzle flash and its light are (1.0: MW2's own)."},
     {"GunOverRadar", "Gun over radar", "Hands and gun over GTA's minimap: drawn over it, a faint ghost under it, or hidden."},
     {"MinimapFollowsView", "Minimap follows view", "Under MW2 the minimap turns with where you look, like MW2's radar. Off: GTA's own."},
     {"KillFeedback", "Kill points", "The yellow +100 and splashes like Headshot!"},
@@ -541,6 +557,8 @@ const Description kDescriptions[] = {
     {"Killstreak2", "Killstreak 2", "Your second pick (with all killstreaks off)."},
     {"Killstreak3", "Killstreak 3", "Your third pick (with all killstreaks off)."},
     {"KeepKillstreaksOnDeath", "Keep after death", "Unused killstreaks survive a death (MW2's rule)."},
+    {"KillstreaksInMissions", "In story missions", "Earn and call killstreaks in story missions too: a strike may kill someone the mission needs and fail it."},
+    {"NukeInMissions", "Nuke in missions", "With killstreaks in story missions, the Tactical Nuke there too (it kills the mission's people). Off: it waits for free roam."},
     {"NukeKillsPlayer", "Nuke kills you too", "The Tactical Nuke takes you out as well, with your vehicle (MW2's rule)."},
     {"EmpKills", "EMP kills", "Kills for the EMP with MW2's counts (MW2 = 15)."},
     {"RegenHealth", "Regenerating health", "Health comes back after a moment out of fire, as in MW2."},
@@ -734,6 +752,9 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     items.push_back(menu::Flag("MW2 blood on damage", "Mw2Blood", c.mw2Blood, apply([&c](float v) { c.mw2Blood = v != 0; })));
     items.push_back(menu::Choice("Gun lighting", "ViewmodelLight", c.viewmodelLight, {"Fixed", "Time of day", "Surroundings"},
                                  [&c](float v) { c.viewmodelLight = std::clamp(static_cast<int>(v), 0, 2); }));
+    items.push_back(menu::Flag("Muzzle flash", "MuzzleFlash", c.muzzleFlash, [&c](float v) { c.muzzleFlash = v != 0; }));
+    items.push_back(menu::Number("Muzzle flash strength", "MuzzleFlashStrength", c.muzzleFlashStrength, 0.1f, 1.5f, 0.1f,
+                                 "%.1fx", [&c](float v) { c.muzzleFlashStrength = std::clamp(v, 0.1f, 1.5f); }));
     items.push_back(menu::Choice("Gun over radar", "GunOverRadar", c.gunOverRadar, {"Over", "Ghost", "Hidden"},
                                  [&c](float v) { c.gunOverRadar = std::clamp(static_cast<int>(v), 0, 2); }));
     items.push_back(menu::Flag("Minimap follows view", "MinimapFollowsView", c.minimapFollowsView,
@@ -760,6 +781,10 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     }
     items.push_back(menu::Flag("Keep unused killstreaks after death (MW2)", "KeepKillstreaksOnDeath", c.keepKillstreaks,
                                apply([&c](float v) { c.keepKillstreaks = v != 0; })));
+    items.push_back(menu::Flag("Killstreaks in story missions (may fail them)", "KillstreaksInMissions", c.killstreaksInMissions,
+                               [&c](float v) { c.killstreaksInMissions = v != 0; }));
+    items.push_back(menu::Flag("Tactical Nuke in story missions too", "NukeInMissions", c.nukeInMissions,
+                               [&c](float v) { c.nukeInMissions = v != 0; }));
     items.push_back(menu::Flag("Tactical Nuke kills you too (MW2)", "NukeKillsPlayer", c.nukeKillsPlayer,
                                [&c](float v) { c.nukeKillsPlayer = v != 0; }));
     items.push_back(menu::Number("EMP kills (MW2 = 15; not with spaced counts)", "EmpKills", static_cast<float>(c.empKills), 3.0f, 25.0f, 1.0f, "%.0f",
@@ -792,7 +817,7 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     items.push_back(menu::Choice("Wrecked streets", "Wrecks", wrecks::g_density, experimental::kWreckNames,
                                  [](float v) { wrecks::g_density = wrecks::ClampDensity(static_cast<int>(v)); }));
     items.back().help = experimental::kWreckHelp;
-    items.push_back(menu::Number("Survival: start wave", "SurvivalStartWave", static_cast<float>(survival::g_startWave), 1.0f, 20.0f, 1.0f,
+    items.push_back(menu::Number("Zombie Waves: start wave", "SurvivalStartWave", static_cast<float>(survival::g_startWave), 1.0f, 20.0f, 1.0f,
                                  "%.0f", [](float v) { survival::g_startWave = static_cast<int>(v); }));
     items.back().help = "The wave a Survival run starts at (the next run; capped at the final wave).";
     // Testing: each zombie mode's moments on demand.
@@ -898,6 +923,7 @@ void ScriptMain() {
     movers::Gatherer gatherer;
     mw2::Driver mw2drv(g_runtime, Log);
     lifecycle::ReasonLog reasons;
+    lifecycle::Settle settle;
 #if CODV_EXPERIMENTAL
     experimental::Modes experimentalModes;
     // tools/build-release.py refuses a binary that holds this line.
@@ -975,6 +1001,7 @@ void ScriptMain() {
         const DWORD now = GetTickCount();
         const std::uint16_t buttons = pad::Buttons();
         mw2drv.SetPadButtons(buttons);
+        mw2drv.SetInteractBlocked(ksfeed::AtCrate() || (!Call<BOOL>(gta::IS_USING_KEYBOARD_AND_MOUSE, 2) && ksfeed::Holding()));
         if (chord.Pressed(buttons, cfg.menuChord) || g_menuToggle.exchange(false)) settingsMenu.open = !settingsMenu.open;
         menu::Tick(settingsMenu, buttons, save);
 
@@ -989,9 +1016,18 @@ void ScriptMain() {
             Call<BOOL>(gta::IS_PLAYER_CONTROL_ON, Call<Player>(gta::PLAYER_ID)))
             drive.Preload(now);
         const char* blocked = lifecycle::Blocked(player, cfg.life);
+        // After a character switch (or a mission placing the player far off): GTA settles him first.
+        {
+            std::string note;
+            const char* settling = settle.Update(player, now, note);
+            if (!note.empty()) Logf("%s", note.c_str());
+            if (!blocked) blocked = settling;
+        }
         // The CODV menu open: CODV stays on (view, gun, HUD), the player stands still while the keys drive the menu.
         mw2drv.FreezeInput(settingsMenu.open);
         reasons.Update(blocked, [](const char* r) { Logf("CODV: %s", r); });
+        // Story missions and cutscenes: what changes for the player, in the log (mission_log.h).
+        missionlog::Tick(player, cfg.enabled, blocked, Log);
 
         // The MW2 item picked in GTA's weapon wheel turns the mode on (off: F10, the chord or the menu).
         if (cfg.wheelItem && wheel.Tick(player) && !cfg.enabled && g_runtime.IsLoaded())
@@ -1011,6 +1047,11 @@ void ScriptMain() {
         controls::Frame cf;
         cf.modeOn = want;
         cf.onFoot = Call<BOOL>(gta::IS_PED_ON_FOOT, player) && !Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, TRUE);
+        // The zombie modes: a vehicle is for getting about (third person, nothing fires from its seat, no
+        // radio). Free Roam: a vehicle is GTA's as the player has it (its camera, weapons and radio).
+        cfg.mw2.seatRules = cfg.gameMode != 0;
+        cf.seated = cfg.mw2.seatRules && Call<BOOL>(gta::IS_PED_IN_ANY_VEHICLE, player, FALSE) != FALSE;
+        controls::SeatRules(want && cf.seated ? Call<int>(gta::GET_VEHICLE_PED_IS_IN, player, FALSE) : 0);
         cf.weaponActive = (last.flags & CV_OUT_ACTIVE) != 0;
         cf.blockSprint = (last.flags & CV_OUT_BLOCK_SPRINT) != 0;
         cf.quickJump = cfg.quickJump;
@@ -1018,12 +1059,22 @@ void ScriptMain() {
         cf.rewardHeld = Streaks(cfg) && ksfeed::Holding();
         cf.remote = remoteView;
         cf.lean = cfg.leanReach > 0.0f;
+        cf.keyboard = Call<BOOL>(gta::IS_USING_KEYBOARD_AND_MOUSE, 2) != FALSE;
+        cf.prompt = Call<BOOL>(gta::IS_HELP_MESSAGE_BEING_DISPLAYED) != FALSE;
         cf.buttons = buttons;
         cf.toggleChord = cfg.toggleChord;
         controls::Apply(cf);
-        // F5c: the killstreaks (counted while MW2 drives the player; never in a story mission).
+        // F5c: the killstreaks (counted while MW2 drives the player; in a story mission only with
+        // KillstreaksInMissions=1, a real risk: a strike that kills the mission's people fails it; the Tactical
+        // Nuke there only with NukeInMissions=1).
         {
             const bool mission = Call<BOOL>(gta::GET_MISSION_FLAG) != FALSE;
+            // `noStreaks`: a story mission without KillstreaksInMissions (no kills counted, nothing called in).
+            const bool noStreaks = mission && !cfg.killstreaksInMissions;
+            // In a mission, its scripted moments (a cutscene, a character switch, a fade, the control taken)
+            // end whatever killstreak runs (the pause menu and GTA's alerts do not).
+            const bool scripted = mission && blocked && std::strcmp(blocked, "pause menu") != 0 && std::strcmp(blocked, "warning screen") != 0 &&
+                                  std::strcmp(blocked, "player dead") != 0;
 #if CODV_EXPERIMENTAL
             // A mode made of others (Police + Zombies) moves from one to the next: Free Roam's rules follow.
             if (const int play = experimentalModes.PlayMode(cfg.gameMode, Log); play != cfg.playMode) {
@@ -1042,15 +1093,22 @@ void ScriptMain() {
             const bool otherMode = cfg.playMode != 0;
             ksfeed::Frame kf;
             kf.enabled = cfg.killstreaks || otherMode;
-            kf.allowed = want && mw2drv.Active() && !mission;
-            kf.stopEffects = !cfg.enabled || mission || otherMode;
+            kf.allowed = want && mw2drv.Active() && !noStreaks;
+            kf.stopEffects = !cfg.enabled || noStreaks || scripted || otherMode;
+            kf.noNuke = mission && !cfg.nukeInMissions;
             kf.modeOff = modeSwitchedOff || modeChanged;
+            // A death counts as kills do: the mode on and no story mission (its flag drops as the player dies
+            // in one, so a mission seen in the last few seconds still holds). Before, a death with the mode off
+            // (a failed mission) showed MW2's "Round Over" once the mode came on.
+            static DWORD missionSeenAt = 0;
+            if (mission) missionSeenAt = now ? now : 1;
+            kf.deathCounts = cfg.enabled && (cfg.killstreaksInMissions || (!mission && (!missionSeenAt || now - missionSeenAt > 5000)));
             kf.menuOpen = settingsMenu.open;
             kf.buttons = buttons;
-            // Hostile kills count while the mode is on (on foot, in a vehicle, in a killstreak's view),
-            // never in a story mission.
+            // Hostile kills count while the mode is on (on foot, in a vehicle, in a killstreak's view), in a
+            // story mission only with KillstreaksInMissions.
             const std::uint32_t kills = drive.TakeHostileKills();
-            kf.hostileKills = want && !mission ? kills : 0u;
+            kf.hostileKills = want && !noStreaks ? kills : 0u;
             drive.TakeKillBonuses(kf.headshots, kf.longshots);
             if (!kf.hostileKills) kf.headshots = kf.longshots = 0;
             kf.dt = Call<float>(gta::GET_FRAME_TIME);
@@ -1080,6 +1138,7 @@ void ScriptMain() {
         }
         if (!want) {
             ThermalScope(false);
+            doors::CloseAll();
             vmfeed::Update(g_runtime, vmfeed::Input{});
             vmfeed::UpdateHud(g_runtime, vmfeed::HudInput{});
             bodyfeed::Tick(g_runtime, player, false, 0.0f, Log);
@@ -1127,6 +1186,9 @@ void ScriptMain() {
             drive.TakeKick(kickPitch, kickYaw);
             mw2On = mw2drv.Tick(player, cfg.mw2, dt, kickPitch, kickYaw, now);
         }
+        // Doors: left out of the MW2 world, opened as the player walks into them (doors.h).
+        static const std::vector<movers::Door> kNoDoors;
+        doors::Tick(player, mw2On && !mw2drv.InVehicle(), liveCollision ? gatherer.Doors() : kNoDoors, dt * 1000.0f, Log);
         {
             // GTA's minimap turns with CODV's view while MW2 has the player on foot (MW2's radar); GTA's own
             // in a vehicle, in a killstreak's camera, or with the option off.
@@ -1146,8 +1208,8 @@ void ScriptMain() {
             // F4a: the view model of this step, and MW2's lens (ADS zoom) for the camera too.
             vmfeed::Input vi;
             // A ladder try keeps the gun on screen (the last frame: GTA has the player for a moment).
-            // MW2's gun: on foot, a ladder try, and a vehicle in GTA's first person (GTA's arms hidden).
-            vi.active = (mw2On || mw2drv.LadderTrying() || mw2drv.VehicleFirstPerson()) && cfg.viewmodel && !mw2drv.ThirdPerson();
+            // MW2's gun: on foot and a ladder try (a vehicle is GTA's alone).
+            vi.active = (mw2On || mw2drv.LadderTrying()) && cfg.viewmodel && !mw2drv.ThirdPerson() && !mw2drv.EasingIn(now);
             // GTA's HUD over the gun: no gun while the phone or the weapon wheel is up, and never over the radar.
             if (Call<BOOL>(gta::IS_PED_RUNNING_MOBILE_PHONE_TASK, player) || Call<BOOL>(gta::IS_HUD_COMPONENT_ACTIVE, 19))
                 vi.active = false;
@@ -1165,16 +1227,23 @@ void ScriptMain() {
                             mw2drv.CurrentView().active ? mw2drv.CurrentView().heading
                                                         : Call<Vector3>(gta::GET_GAMEPLAY_CAM_ROT, 2).z,
                             vi.tracker);
+            vi.muzzleFlash = cfg.muzzleFlash;
+            vi.muzzleFlashStrength = cfg.muzzleFlashStrength;
             mw2drv.SetLens(vmfeed::Update(g_runtime, vi));
+            // The muzzle flash's light on GTA's world (MW2's radius; its intensity scaled to GTA's lights).
+            for (const CvVmFxLight& l : vmfeed::FlashLights()) {
+                const auto byte = [](float c) { return static_cast<int>(std::clamp(c, 0.0f, 1.0f) * 255.0f + 0.5f); };
+                Call<void>(gta::DRAW_LIGHT_WITH_RANGE, l.position[0], l.position[1], l.position[2], byte(l.color[0]),
+                           byte(l.color[1]), byte(l.color[2]), std::clamp(l.range, 0.5f, 12.0f), l.intensity * kFlashLightScale * cfg.muzzleFlashStrength);
+            }
             // MW2's own crosshair (it opens with the spread) and sniper scope, with its images.
             vmfeed::HudInput hi;
             // A ladder or a skydive keeps MW2's HUD (ammo, compass, killstreaks), without the crosshair.
-            // A ladder, a skydive or a vehicle keeps MW2's HUD.
-            hi.active = mw2On || mw2drv.Borrowed();
+            // A ladder or a skydive keeps MW2's HUD; a vehicle is GTA's alone (GTA's HUD).
+            hi.active = mw2On || (mw2drv.Borrowed() && !mw2drv.InVehicle());
             hi.fovY = mw2On ? mw2drv.CurrentView().fov : Call<float>(gta::GET_GAMEPLAY_CAM_FOV);
             hi.thirdPerson = mw2drv.ThirdPerson();
-            hi.vehicle = mw2drv.InVehicle() && !mw2drv.VehicleFirstPerson(); // the weapon bar shows with the gun
-            hi.crosshair = cfg.hud.crosshair && (mw2On || mw2drv.LadderTrying() || mw2drv.SeatedGun());
+            hi.crosshair = cfg.hud.crosshair && (mw2On || mw2drv.LadderTrying()) && !mw2drv.EasingIn(now);
             hi.weaponBar = cfg.mw2Hud;
             hi.grenades = hudevents::Tick(g_runtime, player, mw2On && cfg.mw2Hud);
             // The care package and the sentry gun on screen, with MW2's D-pad images (faded with distance).
@@ -1274,8 +1343,8 @@ void ScriptMain() {
             tactical::Tick(player, true, v.active ? v.pitch : rot.x, v.active ? v.heading : rot.z, ef.eye);
             if (mw2On && equip::C4Out() && cfg.mw2Hud) hud::DrawText("C4 READY   [6] or R R", 0.86f, 0.80f, 0.34f, 235, 235, 225, false);
         }
-        // MW2's weapon sounds on foot and from a vehicle's seat.
-        gtaaudio::Tick(mw2On || mw2drv.SeatedGun());
+        // MW2's weapon sounds on foot.
+        gtaaudio::Tick(mw2On);
         std::uint32_t held =
             input::Buttons([](int control) { return Call<BOOL>(gta::IS_DISABLED_CONTROL_PRESSED, 0, control) != FALSE; });
         // MW2 owns stance and jumping; the gunplay must not toggle its own crouch or quick jump.
@@ -1287,7 +1356,7 @@ void ScriptMain() {
             gs.fire = cfg.fireMode == 1 ? gunplay::FireMode::Ped : gunplay::FireMode::Bullet;
             gs.forceFirstPerson = cfg.firstPerson;
             gs.sounds = cfg.sounds;
-            gs.gtaGunSound = !((mw2On || mw2drv.SeatedGun()) && gtaaudio::Live());
+            gs.gtaGunSound = !(mw2On && gtaaudio::Live());
             gs.streakAttacking = cfg.killstreaks && ksfeed::Attacking();
             gs.ownMissiles = cfg.ownMissiles;
             gs.pedDamage = cfg.damage == 0 ? 1.0f : (cfg.damage == 2 ? 2.0f : 1.5f);
@@ -1302,6 +1371,23 @@ void ScriptMain() {
                 out.mag_size ? out.mag_size
                 : out.hud.weapon >= 0 && static_cast<std::size_t>(out.hud.weapon) < weapons.size() ? weapons[out.hud.weapon].mag
                                                                                                     : 0;
+#if CODV_EXPERIMENTAL
+            {
+                // The zombies' senses: this frame's shots (a silenced gun's carry a few metres), MW2's stance and sprint;
+                // Survivor's scarce supplies: the held gun's rounds.
+                survival::PlayerFacts facts;
+                facts.shots = static_cast<int>(out.shot_count);
+                facts.silenced = (out.flags & CV_OUT_SILENCED) != 0;
+                if (mw2On) {
+                    facts.stance = static_cast<int>(mw2drv.Last().stance);
+                    facts.sprinting = (mw2drv.Last().flags & CV_MOVE_SPRINTING) != 0;
+                }
+                facts.mag = static_cast<int>(out.hud.mag);
+                facts.reserve = static_cast<int>(out.hud.reserve);
+                facts.magSize = static_cast<int>(magSize); // 0: no gun in hand
+                survival::NotePlayer(facts);
+            }
+#endif
             hud::Settings hs = cfg.hud;
             if (mw2Crosshair) hs.crosshair = false; // MW2's reticle (hud_render) draws it
             hs.mw2Hud = mw2Bar;
