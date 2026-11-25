@@ -62,6 +62,15 @@ GTA is the world. Every MW2 asset is read from the player's own copy at setup ti
 | Story missions | GTA's shops work (hold E inside one); scripted spots and character switches are left to GTA until the player is settled; MW2 starts on the mission's weapon; killstreaks in missions as an option, the nuke included |
 | Menu | The version shows in the menu |
 
+## In 0.6.0
+
+| Area | What came |
+|---|---|
+| Weapons | MW2's shell casings fly out of the gun on every shot |
+| Weapons | A flashlight on the gun (H) |
+| Killstreaks | The AC-130 and the Chopper Gunner fly GTA's Titan 250 D and Hunter around you |
+| Setup | MW2's sounds and full muzzle flashes with the current Steam build of MW2; a reinstall keeps all your settings |
+
 ## Next
 
 - Movement tuning: the remaining small hitches at car corners and low fences.

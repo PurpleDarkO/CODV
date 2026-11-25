@@ -776,6 +776,9 @@ pub struct Rig {
     /// vertices use extra bones after the rig's, copies of those, zeroed while the clip is empty.
     rocket_bones: Option<Vec<usize>>,
     rocket_shown: bool,
+    /// Loose copies of other models (a shell eject's brass) after the rocket's bones: one bone each,
+    /// which the caller places every frame (`skin_with_tags` leaves them collapsed).
+    copies: usize,
 }
 
 /// IW view axes (x forward, y left, z up) to D3D view axes (x right, y up, z forward).
@@ -866,7 +869,28 @@ impl Rig {
             notes: Vec::new(),
             rocket_bones,
             rocket_shown: true,
+            copies: 0,
         })
+    }
+
+    /// Adds `count` copies of `m` (a shell eject's brass), each rigid on a bone of its own after the
+    /// rig's; returns the first copy's bone, or None when the 256 bones a vertex can name run out.
+    pub fn add_copies(&mut self, m: &vm::Model, count: usize) -> Option<usize> {
+        let first = self.dobj.bone_count() + self.rocket_bones.as_ref().map_or(0, Vec::len) + self.copies;
+        if count == 0 || first + count > 256 {
+            return None;
+        }
+        let mesh = Arc::make_mut(&mut self.mesh);
+        for k in 0..count {
+            let start = mesh.vertices.len();
+            append_model(mesh, m, 0, &[0; 6]).ok()?;
+            for v in &mut mesh.vertices[start..] {
+                v.bones = [(first + k) as u8, 0, 0, 0];
+                v.weights = [1.0, 0.0, 0.0, 0.0];
+            }
+        }
+        self.copies += count;
+        Some(first)
     }
 
     /// Whether the rig carries a rocketModel (tests and the log).
@@ -1023,6 +1047,7 @@ impl Rig {
             .iter()
             .map(|m| Some(*m))
             .chain(extra.iter().map(|&b| self.rocket_shown.then(|| skin[b])))
+            .chain(std::iter::repeat_n(None, self.copies))
             .map(|m| {
                 let Some(m) = m else { return [0.0; 12] };
                 let m = eye * m;

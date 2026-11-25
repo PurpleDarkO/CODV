@@ -340,6 +340,9 @@ float Update(RuntimeBridge& runtime, const Input& in) {
         g_status = "viewmodel: no mesh";
         return 0.0f;
     }
+    // MW2's brass: the bones from brass_bone to the end; collapsed (nothing drawn) when it is off.
+    if (!in.shellEject && f.brass_bone > 0 && f.brass_bone * 12 < g_bones.size())
+        std::fill(g_bones.begin() + f.brass_bone * 12, g_bones.end(), 0.0f);
     const float fovY = mw2input::VerticalFov(mw2input::LensFov(in.cgFov, f.ads_zoom_fov, f.ads));
     if (f.flags & CV_VM_SCOPED) {
         // Behind the scope: MW2's lens, no view model (iw4L viewweapon_drawgun).

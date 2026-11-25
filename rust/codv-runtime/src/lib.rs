@@ -1516,7 +1516,10 @@ pub struct CvVmFrame {
     /// ADS fraction 0..1 and the weapon's ADS zoom FOV (MW2 horizontal degrees at 4:3).
     pub ads: f32,
     pub ads_zoom_fov: f32,
-    pub reserved: [u32; 2],
+    /// The first bone of the brass copies (MW2's shell ejects; 0 none): the host collapses the bones
+    /// from it to the end when shell ejects are off. Was reserved: older hosts leave it alone.
+    pub brass_bone: u32,
+    pub reserved: u32,
 }
 
 #[repr(C)]
@@ -1613,6 +1616,7 @@ pub unsafe extern "C" fn cv_vm_frame(rt: *const c_void, out: *mut CvVmFrame, bon
             return 0;
         }
         let Some((mesh_id, list, ads, fov)) = inner.vm.as_ref().and_then(|v| v.frame()) else { return 0 };
+        let brass_bone = inner.vm.as_ref().map_or(0, |v| v.brass_bone());
         if bones.is_null() || (capacity as usize) < list.len() {
             return 0;
         }
@@ -1627,7 +1631,8 @@ pub unsafe extern "C" fn cv_vm_frame(rt: *const c_void, out: *mut CvVmFrame, bon
             bone_count: list.len() as u32,
             ads,
             ads_zoom_fov: fov,
-            reserved: [0; 2],
+            brass_bone,
+            reserved: 0,
         };
         1
     })

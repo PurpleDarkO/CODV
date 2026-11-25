@@ -400,3 +400,47 @@ fn the_rpg_shows_its_rocket_while_loaded() {
     assert!(back_while_reloading, "the rocket shows during the reload, before it ends");
     assert!(!hidden(&rig), "reloaded");
 }
+
+/// The player's import (CODV_MW2_OUT): the M4's shell eject throws brass, its copies rigid on bones of
+/// their own after the rig's, collapsed until the caller places them.
+#[test]
+fn brass_copies_sit_on_bones_of_their_own() {
+    let Ok(dir) = std::env::var("CODV_MW2_OUT") else { return };
+    let dir = std::path::Path::new(&dir);
+    let table = codv_mw2data::table::from_json(&std::fs::read_to_string(dir.join("weapons.json")).unwrap()).unwrap();
+    let row = table.find("m4_mp").unwrap();
+    let fx = row.s("view_eject_fx");
+    if fx.is_empty() {
+        return; // an import from before CODV read the shell ejects
+    }
+    let read = |sub: &str, n: &str, ext: &str| {
+        std::fs::read(
+            dir.join("viewmodels").join(sub).join(format!("{}.{ext}", vm::file_stem(&n.to_ascii_lowercase()))),
+        )
+        .unwrap()
+    };
+    let effect = vm::read_effect(&read("fx", fx, "cfx")).unwrap();
+    let brass = effect.elems.iter().flat_map(|e| e.models.iter()).next().expect("the eject throws a model");
+    let brass = vm::read_model(&read("models", brass, "cvm")).unwrap();
+    let model = |n: &str| vm::read_model(&read("models", n, "cvm")).unwrap();
+    let (arsenal, _) = Arsenal::from_table(&table);
+    let mut rig = Rig::build(
+        arsenal.id("m4_mp").unwrap(),
+        &model(row.s("hand_model")),
+        &model(row.s("gun_model")),
+        &[],
+        vec![None; SLOTS],
+        Timers::from_row(row),
+        PlacementFacts::from_row(row),
+    )
+    .unwrap();
+    assert!(rig.bone("tag_brass").is_some(), "the M4 has an ejection port");
+    let vertices = rig.mesh().vertices.len();
+    let first = rig.add_copies(&brass, 4).unwrap();
+    assert_eq!(first, rig.bone_count());
+    let added = &rig.mesh().vertices[vertices..];
+    assert!(!added.is_empty() && added.iter().all(|v| (first..first + 4).contains(&usize::from(v.bones[0]))));
+    let skin = rig.skin();
+    assert_eq!(skin.len(), first + 4);
+    assert!(skin[first..].iter().all(|m| m.iter().all(|v| *v == 0.0)));
+}

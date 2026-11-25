@@ -463,10 +463,12 @@ pub fn read_anim(b: &[u8]) -> Res<Anim> {
 
 // ---- effects ----------------------------------------------------------------
 
-/// `fx/<name>.cfx`: one FxEffectDef (a gun's view muzzle flash), its elements as IW4's FxElemDef holds
-/// them. Distances are inches in the effect's frame (MW2's: X along the barrel, Y left, Z up); times
-/// milliseconds; every range is `base + amplitude * random(0..1)`.
-pub const EFFECT_MAGIC: &[u8; 4] = b"CFX1";
+/// `fx/<name>.cfx`: one FxEffectDef (a gun's view muzzle flash or shell eject), its elements as IW4's
+/// FxElemDef holds them. Distances are inches in the effect's frame (MW2's: X along the barrel, Y left,
+/// Z up); times milliseconds; every range is `base + amplitude * random(0..1)`. CFX2 adds the model
+/// elements' model names; CFX1 files (an older import) still read, without them.
+pub const EFFECT_MAGIC: &[u8; 4] = b"CFX2";
+const EFFECT_MAGIC_V1: &[u8; 4] = b"CFX1";
 
 /// FxElemType values the runtime knows.
 pub mod fx_kind {
@@ -534,6 +536,8 @@ pub struct FxElem {
     pub materials: Vec<Material>,
     /// A runner's effects (one picked at random), by name: spawned where the runner is.
     pub runs: Vec<String>,
+    /// A model element's models (one picked at random), by XModel name: the shell eject's brass.
+    pub models: Vec<String>,
     pub sort_order: u8,
     pub lighting_frac: u8,
 }
@@ -592,13 +596,21 @@ pub fn write_effect(e: &Effect) -> Vec<u8> {
         }
         w.u8(x.sort_order);
         w.u8(x.lighting_frac);
+        w.len(x.models.len());
+        for n in &x.models {
+            w.str(n);
+        }
     }
     w.0
 }
 
 pub fn read_effect(b: &[u8]) -> Res<Effect> {
     let mut r = R { b, at: 0 };
-    r.magic(EFFECT_MAGIC)?;
+    let v2 = match r.take(4)? {
+        m if m == EFFECT_MAGIC => true,
+        m if m == EFFECT_MAGIC_V1 => false,
+        _ => return Err("not a CFX2 file (re-run the MW2 import)".into()),
+    };
     let name = r.str()?;
     let looping_life_ms = r.u32()? as i32;
     let n = r.len(64)?;
@@ -649,6 +661,14 @@ pub fn read_effect(b: &[u8]) -> Res<Effect> {
         let materials = (0..count).map(|_| read_material(&mut r)).collect::<Res<Vec<_>>>()?;
         let count = r.len(4)?;
         let runs = (0..count).map(|_| r.str()).collect::<Res<Vec<_>>>()?;
+        let sort_order = r.u8()?;
+        let lighting_frac = r.u8()?;
+        let models = if v2 {
+            let count = r.len(4)?;
+            (0..count).map(|_| r.str()).collect::<Res<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
         elems.push(FxElem {
             kind,
             flags,
@@ -671,8 +691,9 @@ pub fn read_effect(b: &[u8]) -> Res<Effect> {
             visuals,
             materials,
             runs,
-            sort_order: r.u8()?,
-            lighting_frac: r.u8()?,
+            models,
+            sort_order,
+            lighting_frac,
         });
     }
     Ok(Effect { name, looping_life_ms, elems })
@@ -771,6 +792,7 @@ mod tests {
                     ..Default::default()
                 }],
                 runs: vec!["muzzleflashes/other".into()],
+                models: vec!["shell_rifle".into()],
                 sort_order: 5,
                 lighting_frac: 0,
                 ..Default::default()
@@ -778,5 +800,13 @@ mod tests {
         };
         assert_eq!(read_effect(&write_effect(&e)).unwrap(), e);
         assert!(read_effect(b"CFX1").is_err());
+        // An older import's CFX1 file: the same without the model names.
+        let mut old = write_effect(&e);
+        old[..4].copy_from_slice(EFFECT_MAGIC_V1);
+        let names = 4 + 4 + "shell_rifle".len();
+        old.truncate(old.len() - names);
+        let mut without = e.clone();
+        without.elems[0].models.clear();
+        assert_eq!(read_effect(&old).unwrap(), without);
     }
 }

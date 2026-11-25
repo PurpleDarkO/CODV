@@ -34,6 +34,7 @@
 #include "version_guard.h"
 #include "equipment.h"
 #include "equipment_rules.h"
+#include "flashlight_rules.h"
 #include "tactical.h"
 #include "tactical_rules.h"
 #include "tracers.h"
@@ -60,6 +61,8 @@ FILE* g_log = nullptr;
 RuntimeBridge g_runtime;
 std::atomic<bool> g_menuToggle{false};
 std::atomic<bool> g_modeToggle{false};
+std::atomic<bool> g_flashlightPress{false};
+std::atomic<unsigned> g_flashlightKey{0x48}; // H: GTA's headlight key, unused on foot
 std::atomic<unsigned> g_toggleKey{0x79}; // VK_F10
 std::atomic<unsigned> g_menuKey{0xBB};   // VK_OEM_PLUS: the = / + key (numpad + too)
 
@@ -120,6 +123,12 @@ struct Config {
     // (MuzzleFlashStrength: 1 MW2's own; a little softer by default).
     bool muzzleFlash = true;
     float muzzleFlashStrength = 0.6f;
+    // MW2's brass thrown from the gun on every shot (ShellEject).
+    bool shellEject = true;
+    // CODV's flashlight (not MW2's): FlashlightKey (H; 0 none) turns it on and off under MW2, at
+    // FlashlightBrightness.
+    unsigned flashlightKey = 0x48;
+    float flashlightBrightness = 4.0f;
     // MW2's gun over GTA's radar (GunOverRadar): 0 drawn over it, 1 a faint ghost under it (the default),
     // 2 hidden under it.
     int gunOverRadar = 1;
@@ -182,6 +191,7 @@ struct Config {
     bool allKillstreaks = true;   // every killstreak at its kill count (CODV); off: the three picks (MW2)
     bool keepKillstreaks = false; // unused killstreaks survive a death (MW2); off: a death loses them
     bool killstreaksInMissions = false; // killstreaks in story missions too (a real risk: a strike may fail one)
+    bool gunshipAircraft = true;        // the AC-130 and the Chopper Gunner fly GTA's Titan 250 D and Hunter
     bool nukeInMissions = false;        // with them, the Tactical Nuke there too (off: it waits for free roam)
     bool nukeKillsPlayer = false; // the Tactical Nuke kills the player too (MW2); off: CODV spares the player
     bool jumpSlowdown = false; // MW2's (off: a landing keeps the speed)
@@ -250,6 +260,11 @@ Config LoadConfig() {
     c.viewmodelLight = std::clamp(static_cast<int>(util::IniFloat(ini, "ViewmodelLight", static_cast<float>(c.viewmodelLight))), 0, 2);
     c.muzzleFlash = util::IniFlag(ini, "MuzzleFlash", c.muzzleFlash);
     c.muzzleFlashStrength = std::clamp(util::IniFloat(ini, "MuzzleFlashStrength", c.muzzleFlashStrength), 0.1f, 1.5f);
+    c.shellEject = util::IniFlag(ini, "ShellEject", c.shellEject);
+    const std::string light = util::IniString(ini, L"CodV", "FlashlightKey");
+    if (!light.empty()) c.flashlightKey = static_cast<unsigned>(std::strtoul(light.c_str(), nullptr, 0));
+    c.flashlightBrightness = std::clamp(util::IniFloat(ini, "FlashlightBrightness", c.flashlightBrightness),
+                                        flashlight::kBrightnessMin, flashlight::kBrightnessMax);
     c.gunOverRadar = std::clamp(static_cast<int>(util::IniFloat(ini, "GunOverRadar", static_cast<float>(c.gunOverRadar))), 0, 2);
     c.minimapFollowsView = util::IniFlag(ini, "MinimapFollowsView", c.minimapFollowsView);
     c.bodyPose = util::IniFlag(ini, "BodyPose", c.bodyPose);
@@ -301,6 +316,7 @@ Config LoadConfig() {
     c.killstreaks = util::IniFlag(ini, "Killstreaks", c.killstreaks);
     c.killstreaksInMissions = util::IniFlag(ini, "KillstreaksInMissions", c.killstreaksInMissions);
     c.nukeInMissions = util::IniFlag(ini, "NukeInMissions", c.nukeInMissions);
+    c.gunshipAircraft = util::IniFlag(ini, "GunshipAircraft", c.gunshipAircraft);
     c.scavenger = util::IniFlag(ini, "Scavenger", c.scavenger);
     c.allKillstreaks = util::IniFlag(ini, "AllKillstreaks", c.allKillstreaks);
     c.spacedKillstreaks = util::IniFlag(ini, "SpacedKillstreaks", c.spacedKillstreaks);
@@ -333,6 +349,7 @@ void Keyboard(DWORD key, WORD, BYTE, BOOL, BOOL, BOOL wasDownBefore, BOOL isUpNo
     if (pressed && key != 0 && (key == g_menuKey.load() || (g_menuKey.load() == 0xBB && key == VK_ADD)))
         g_menuToggle = true; // MenuKey (default +, numpad + too)
     if (pressed && key != 0 && key == g_toggleKey.load()) g_modeToggle = true;
+    if (pressed && key != 0 && key == g_flashlightKey.load()) g_flashlightPress = true;
     menu::OnKey(key, pressed);
 }
 
@@ -542,6 +559,8 @@ const Description kDescriptions[] = {
     {"ViewmodelLight", "Gun lighting", "Hands and gun: fixed daylight, GTA's time of day, or the light around you."},
     {"MuzzleFlash", "Muzzle flash", "MW2's muzzle flash on every shot, lighting up what is around you."},
     {"MuzzleFlashStrength", "Muzzle flash strength", "How bright the muzzle flash and its light are (1.0: MW2's own)."},
+    {"ShellEject", "Shell casings", "MW2's brass flying out of the gun on every shot."},
+    {"FlashlightBrightness", "Flashlight brightness", "How bright the flashlight is (H turns it on and off; FlashlightKey in the INI)."},
     {"GunOverRadar", "Gun over radar", "Hands and gun over GTA's minimap: drawn over it, a faint ghost under it, or hidden."},
     {"MinimapFollowsView", "Minimap follows view", "Under MW2 the minimap turns with where you look, like MW2's radar. Off: GTA's own."},
     {"KillFeedback", "Kill points", "The yellow +100 and splashes like Headshot!"},
@@ -558,6 +577,7 @@ const Description kDescriptions[] = {
     {"Killstreak3", "Killstreak 3", "Your third pick (with all killstreaks off)."},
     {"KeepKillstreaksOnDeath", "Keep after death", "Unused killstreaks survive a death (MW2's rule)."},
     {"KillstreaksInMissions", "In story missions", "Earn and call killstreaks in story missions too: a strike may kill someone the mission needs and fail it."},
+    {"GunshipAircraft", "Gunship aircraft", "The AC-130 and the Chopper Gunner fly GTA's Titan 250 D and Hunter around you, your view at their gun. Off: the camera alone."},
     {"NukeInMissions", "Nuke in missions", "With killstreaks in story missions, the Tactical Nuke there too (it kills the mission's people). Off: it waits for free roam."},
     {"NukeKillsPlayer", "Nuke kills you too", "The Tactical Nuke takes you out as well, with your vehicle (MW2's rule)."},
     {"EmpKills", "EMP kills", "Kills for the EMP with MW2's counts (MW2 = 15)."},
@@ -755,6 +775,11 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     items.push_back(menu::Flag("Muzzle flash", "MuzzleFlash", c.muzzleFlash, [&c](float v) { c.muzzleFlash = v != 0; }));
     items.push_back(menu::Number("Muzzle flash strength", "MuzzleFlashStrength", c.muzzleFlashStrength, 0.1f, 1.5f, 0.1f,
                                  "%.1fx", [&c](float v) { c.muzzleFlashStrength = std::clamp(v, 0.1f, 1.5f); }));
+    items.push_back(menu::Flag("Shell casings", "ShellEject", c.shellEject, [&c](float v) { c.shellEject = v != 0; }));
+    items.push_back(menu::Number("Flashlight brightness", "FlashlightBrightness", c.flashlightBrightness,
+                                 flashlight::kBrightnessMin, flashlight::kBrightnessMax, 1.0f, "%.0f", [&c](float v) {
+                                     c.flashlightBrightness = std::clamp(v, flashlight::kBrightnessMin, flashlight::kBrightnessMax);
+                                 }));
     items.push_back(menu::Choice("Gun over radar", "GunOverRadar", c.gunOverRadar, {"Over", "Ghost", "Hidden"},
                                  [&c](float v) { c.gunOverRadar = std::clamp(static_cast<int>(v), 0, 2); }));
     items.push_back(menu::Flag("Minimap follows view", "MinimapFollowsView", c.minimapFollowsView,
@@ -781,6 +806,7 @@ menu::Model BuildMenu(Config& c, const std::vector<CvWeaponInfo>& weapons, const
     }
     items.push_back(menu::Flag("Keep unused killstreaks after death (MW2)", "KeepKillstreaksOnDeath", c.keepKillstreaks,
                                apply([&c](float v) { c.keepKillstreaks = v != 0; })));
+    items.push_back(menu::Flag("Gunship aircraft", "GunshipAircraft", c.gunshipAircraft, [&c](float v) { c.gunshipAircraft = v != 0; }));
     items.push_back(menu::Flag("Killstreaks in story missions (may fail them)", "KillstreaksInMissions", c.killstreaksInMissions,
                                [&c](float v) { c.killstreaksInMissions = v != 0; }));
     items.push_back(menu::Flag("Tactical Nuke in story missions too", "NukeInMissions", c.nukeInMissions,
@@ -937,6 +963,8 @@ void ScriptMain() {
     pad::Chord chord, toggleChord;
     g_toggleKey = cfg.toggleKey;
     g_menuKey = cfg.menuKey;
+    g_flashlightKey = cfg.flashlightKey;
+    bool flashlightOn = false;
     std::string banner;
     DWORD bannerUntil = 0;
     WheelItem wheel;
@@ -1114,6 +1142,7 @@ void ScriptMain() {
             kf.dt = Call<float>(gta::GET_FRAME_TIME);
             kf.look.mouseSensitivity = cfg.mw2.input.mouseSensitivity;
             kf.look.invertLook = cfg.mw2.input.invertLook;
+            kf.look.aircraft = cfg.gunshipAircraft;
             kf.nukeKillsPlayer = cfg.nukeKillsPlayer;
             ksfeed::Tick(g_runtime, player, kf, Log);
             modeSwitchedOff = false;
@@ -1229,12 +1258,34 @@ void ScriptMain() {
                             vi.tracker);
             vi.muzzleFlash = cfg.muzzleFlash;
             vi.muzzleFlashStrength = cfg.muzzleFlashStrength;
+            vi.shellEject = cfg.shellEject;
             mw2drv.SetLens(vmfeed::Update(g_runtime, vi));
             // The muzzle flash's light on GTA's world (MW2's radius; its intensity scaled to GTA's lights).
             for (const CvVmFxLight& l : vmfeed::FlashLights()) {
                 const auto byte = [](float c) { return static_cast<int>(std::clamp(c, 0.0f, 1.0f) * 255.0f + 0.5f); };
                 Call<void>(gta::DRAW_LIGHT_WITH_RANGE, l.position[0], l.position[1], l.position[2], byte(l.color[0]),
                            byte(l.color[1]), byte(l.color[2]), std::clamp(l.range, 0.5f, 12.0f), l.intensity * kFlashLightScale * cfg.muzzleFlashStrength);
+            }
+            // CODV's flashlight: FlashlightKey flips it while MW2 drives the player on foot (not in a
+            // killstreak's camera or the menu); a spot light from the gun along the view.
+            {
+                const bool driving = mw2On && !remote && !settingsMenu.open;
+                const bool was = flashlightOn;
+                flashlightOn = flashlight::Toggle(flashlightOn, g_flashlightPress.exchange(false), driving);
+                if (flashlightOn != was) {
+                    Call<void>(gta::PLAY_SOUND_FRONTEND, -1, "TOGGLE_ON", "HUD_FRONTEND_DEFAULT_SOUNDSET", TRUE);
+                    Logf("CODV: flashlight %s", flashlightOn ? "on" : "off");
+                }
+                if (flashlightOn && driving) {
+                    const Vector3 cam = Call<Vector3>(gta::GET_FINAL_RENDERED_CAM_COORD);
+                    const Vector3 rot = Call<Vector3>(gta::GET_FINAL_RENDERED_CAM_ROT, 2);
+                    const flashlight::V3 at = flashlight::Origin({cam.x, cam.y, cam.z}, rot.x, rot.z);
+                    const flashlight::V3 dir = flashlight::Forward(rot.x, rot.z);
+                    Call<void>(gta::DRAW_SHADOWED_SPOT_LIGHT, at.x, at.y, at.z, dir.x, dir.y, dir.z,
+                               flashlight::kColor[0], flashlight::kColor[1], flashlight::kColor[2], flashlight::kReach,
+                               cfg.flashlightBrightness, flashlight::kHardness, flashlight::kCone, flashlight::kFalloff,
+                               flashlight::kShadowId);
+                }
             }
             // MW2's own crosshair (it opens with the spread) and sniper scope, with its images.
             vmfeed::HudInput hi;

@@ -8,6 +8,8 @@
 //                     105 / 40 / 25 mm guns with MW2's fire rates, clips, reloads,
 //                     shell flight time and blast radii; Tab changes gun, E thermal.
 //   Chopper Gunner    40 s circling low, thermal, the 20 mm cannon (explosive).
+//                     Both fly a GTA aircraft on the orbit, the camera at its gun (GTA's
+//                     Titan 250 D and Hunter; GunshipAircraft=0: the camera alone).
 //   Target map        the airstrike's target, picked from a camera above the
 //                     player (look moves it, the trigger confirms, E cancels).
 //
@@ -29,11 +31,12 @@ enum class Kind { None, Predator, Ac130, Chopper, TargetMap };
 struct Settings {
     float mouseSensitivity = 1.0f;
     bool invertLook = false;
+    bool aircraft = true; // GunshipAircraft: the AC-130 and the Chopper Gunner fly a GTA aircraft
 };
 
 class Remote {
 public:
-    bool Start(Kind kind, RuntimeBridge& runtime, Ped player, util::LogFn log);
+    bool Start(Kind kind, RuntimeBridge& runtime, Ped player, const Settings& s, util::LogFn log);
     // One frame: input, camera, guns; fills the view for MW2's HUD.
     void Tick(RuntimeBridge& runtime, Ped player, const Settings& s, float dt, CvStreakView& view);
     void Stop();
@@ -53,6 +56,9 @@ private:
     void TickGunship(RuntimeBridge& runtime, Ped player, const Settings& s, float dt, CvStreakView& view);
     void TickTargetMap(Ped player, const Settings& s, float dt, CvStreakView& view);
     void Fire(RuntimeBridge& runtime, const ksrules::Gun& gun, int index, ksworld::V3 from, ksworld::V3 dir);
+    // The gunship's aircraft on the orbit (spawned once its model has loaded), and gone.
+    void FlyCraft(const float cam[3], float orbitDeg);
+    void RemoveCraft();
 
     Kind kind_ = Kind::None;
     util::LogFn log_ = nullptr;
@@ -70,6 +76,8 @@ private:
     std::uint32_t clip_[3] = {}, nextShot_ = 0, reloadUntil_[3] = {};
     bool thermal_ = true;
     std::vector<Shell> shells_;
+    Hash craftModel_ = 0;
+    Vehicle craft_ = 0;
     // Target map
     ksworld::V3 target_;
     float targetHeading_ = 0.0f;

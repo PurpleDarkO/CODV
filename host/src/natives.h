@@ -370,6 +370,7 @@ CV_NATIVE(GET_OFFSET_FROM_ENTITY_GIVEN_WORLD_COORDS, 0x2274BC1C4885E333) // Vect
 CV_NATIVE(IS_ENTITY_AN_OBJECT, 0x8D68C8FD0FACA94E)       // BOOL (Entity)
 CV_NATIVE(DRAW_LINE, 0x6B7256074AE34680)                 // void (3 from, 3 to, int r, int g, int b, int a)
 CV_NATIVE(DRAW_LIGHT_WITH_RANGE, 0xF2A1B2771A01DBD4)     // void (3 at, int r, int g, int b, float range, float intensity)
+CV_NATIVE(DRAW_SHADOWED_SPOT_LIGHT, 0x5BCA583A583194DB) // void (3 at, 3 dir, int r, g, b, float distance, brightness, roundness, radius, falloff, int shadowId)
 // MW2's special grenades (tactical.cpp): a flashed or stunned hostile shields its eyes.
 CV_NATIVE(TASK_COWER, 0x3EB1FE9E8E908E15)                // void (Ped, int ms)
 CV_NATIVE(IS_MODEL_IN_CDIMAGE, 0x35B9E0803292B641)       // BOOL (Hash): the game has this model

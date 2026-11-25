@@ -33,6 +33,7 @@ struct Input {
     heartbeat::Screen tracker;  // the heartbeat sensor's display
     bool muzzleFlash = true;    // MW2's muzzle flash on the gun (MuzzleFlash)
     float muzzleFlashStrength = 1.0f; // its brightness (MuzzleFlashStrength; 1: MW2's own)
+    bool shellEject = true;     // MW2's brass thrown from the gun on every shot (ShellEject)
 };
 // Whether the gun shown last has a heartbeat sensor's screen (its display is wanted).
 bool TrackerShown();

@@ -14,6 +14,17 @@ constexpr int kLookLR = 1, kLookUD = 2, kAttack = 24, kSelectWeapon = 37, kWheel
 constexpr float kMouseDegrees = 10.0f, kPadYaw = 120.0f, kPadPitch = 80.0f; // as MW2 movement's look
 constexpr float kPredatorFov = 45.0f, kTargetMapHeight = 120.0f, kTargetMapFov = 60.0f;
 const Hash kMinigun = util::Joaat("WEAPON_MINIGUN");
+// The gunships' aircraft: GTA's AC-130 (Titan 250 D; the plain Titan on a game without it) and its
+// attack helicopter (Hunter; the Buzzard without it).
+const Hash kAc130Models[] = {util::Joaat("titan2"), util::Joaat("titan")};
+const Hash kChopperModels[] = {util::Joaat("hunter"), util::Joaat("buzzard")};
+
+template <std::size_t N>
+Hash FirstModel(const Hash (&models)[N]) {
+    for (Hash m : models)
+        if (Call<BOOL>(gta::IS_MODEL_IN_CDIMAGE, m) && Call<BOOL>(gta::IS_MODEL_VALID, m)) return m;
+    return 0;
+}
 
 float Rad(float d) {
     return d * 3.14159265f / 180.0f;
@@ -48,7 +59,7 @@ void Remote::Look(const Settings& s, float dt, float& yaw, float& pitch) const {
     }
 }
 
-bool Remote::Start(Kind kind, RuntimeBridge& runtime, Ped player, util::LogFn log) {
+bool Remote::Start(Kind kind, RuntimeBridge& runtime, Ped player, const Settings& s, util::LogFn log) {
     if (kind_ != Kind::None) return false;
     log_ = log;
     const V3 p = ksworld::Of(Call<Vector3>(gta::GET_ENTITY_COORDS, player, TRUE));
@@ -93,6 +104,9 @@ bool Remote::Start(Kind kind, RuntimeBridge& runtime, Ped player, util::LogFn lo
         for (int i = 0; i < 3; ++i) clip_[i] = guns_[i].clip, reloadUntil_[i] = 0;
         thermal_ = true;
         Call<void>(gta::SET_SEETHROUGH, TRUE);
+        RemoveCraft();
+        craftModel_ = s.aircraft ? (kind == Kind::Ac130 ? FirstModel(kAc130Models) : FirstModel(kChopperModels)) : 0;
+        if (craftModel_) ksworld::Model(craftModel_);
         float at[3];
         const float radius = kind == Kind::Ac130 ? ksrules::kAc130Radius : ksrules::kChopperRadius;
         const float height = kind == Kind::Ac130 ? ksrules::kAc130Height : ksrules::kChopperHeight;
@@ -215,6 +229,7 @@ void Remote::TickGunship(RuntimeBridge& runtime, Ped player, const Settings& s, 
                    ac130 ? ksrules::kAc130Height : ksrules::kChopperHeight, orbitStart_, t,
                    ac130 ? ksrules::kAc130TurnSeconds : ksrules::kChopperTurnSeconds, at);
     const V3 cam = {at[0], at[1], at[2]};
+    FlyCraft(at, ksrules::OrbitAngle(orbitStart_, t, ac130 ? ksrules::kAc130TurnSeconds : ksrules::kChopperTurnSeconds));
     float basePitch = 0.0f, baseHeading = 0.0f;
     Aim(cam, {centre_[0], centre_[1], centre_[2]}, basePitch, baseHeading);
     float yaw = 0.0f, pitch = 0.0f;
@@ -263,8 +278,46 @@ void Remote::TickTargetMap(Ped, const Settings& s, float dt, CvStreakView& view)
     cam_.Set({target_.x, target_.y, target_.z + kTargetMapHeight}, -89.0f, targetHeading_, kTargetMapFov);
 }
 
+void Remote::FlyCraft(const float cam[3], float orbitDeg) {
+    if (!craftModel_) return;
+    const ksrules::CraftPose p = ksrules::PlaceCraft(cam, orbitDeg, kind_ == Kind::Ac130 ? ksrules::kAc130Craft : ksrules::kChopperCraft);
+    if (craft_ && !Call<BOOL>(gta::DOES_ENTITY_EXIST, craft_)) craft_ = 0;
+    if (!craft_) {
+        if (!ksworld::Model(craftModel_)) return; // still loading: the camera flies alone meanwhile
+        craft_ = Call<Vehicle>(gta::CREATE_VEHICLE, craftModel_, p.at[0], p.at[1], p.at[2], p.heading, FALSE, FALSE, FALSE);
+        Call<void>(gta::SET_MODEL_AS_NO_LONGER_NEEDED, craftModel_);
+        if (!craft_) {
+            util::Logf(log_, "CODV: no gunship aircraft (0x%08X did not spawn)", craftModel_);
+            craftModel_ = 0;
+            return;
+        }
+        // Placed every frame, not flown: frozen, no collision, unhurt, its engines and rotors turning.
+        Call<void>(gta::SET_ENTITY_AS_MISSION_ENTITY, craft_, TRUE, TRUE);
+        Call<void>(gta::FREEZE_ENTITY_POSITION, craft_, TRUE);
+        Call<void>(gta::SET_ENTITY_COLLISION, craft_, FALSE, FALSE);
+        Call<void>(gta::SET_ENTITY_INVINCIBLE, craft_, TRUE, FALSE);
+        Call<void>(gta::SET_ENTITY_LOD_DIST, craft_, 2000);
+        Call<void>(gta::SET_VEHICLE_ENGINE_ON, craft_, TRUE, TRUE, FALSE);
+        Call<void>(gta::CONTROL_LANDING_GEAR, craft_, 3);
+        if (kind_ == Kind::Chopper) Call<void>(gta::SET_HELI_BLADES_FULL_SPEED, craft_);
+        util::Logf(log_, "CODV: gunship aircraft 0x%08X on the orbit", craftModel_);
+    }
+    Call<void>(gta::SET_ENTITY_COORDS_NO_OFFSET, craft_, p.at[0], p.at[1], p.at[2], FALSE, FALSE, FALSE);
+    Call<void>(gta::SET_ENTITY_ROTATION, craft_, 0.0f, p.roll, p.heading, 2, TRUE);
+}
+
+void Remote::RemoveCraft() {
+    if (craft_ && Call<BOOL>(gta::DOES_ENTITY_EXIST, craft_)) {
+        Call<void>(gta::SET_ENTITY_AS_MISSION_ENTITY, craft_, TRUE, TRUE);
+        Call<void>(gta::DELETE_ENTITY, &craft_);
+    }
+    craft_ = 0;
+}
+
 void Remote::Stop() {
     if (kind_ == Kind::None) return;
+    RemoveCraft();
+    craftModel_ = 0;
     // Shells still in the air land now.
     for (const Shell& sh : shells_)
         ksworld::Explode(sh.at, sh.gun == 0 ? ksworld::kExpTankShell : ksworld::kExpGrenade, guns_[sh.gun].radius, 0.2f);

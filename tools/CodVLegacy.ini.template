@@ -187,6 +187,14 @@ ViewmodelLight=2
 MuzzleFlash=1
 ; MuzzleFlashStrength: how bright the muzzle flash and its light are, 0.1 to 1.5 (1.0 = MW2's own; default 0.6).
 MuzzleFlashStrength=0.6
+; ShellEject: MW2's brass flying out of the gun on every shot (each gun's own shell eject from your MW2, from its
+; ejection port). 0 = off.
+ShellEject=1
+; FlashlightKey: the key that turns CODV's flashlight on and off while MW2 drives you (a Windows virtual-key code;
+; 0x48 = H, default; 0 = none). The flashlight is CODV's own: MW2's guns have none.
+FlashlightKey=0x48
+; FlashlightBrightness: how bright the flashlight is, 1 to 12 (default 4).
+FlashlightBrightness=4
 ; GunOverRadar: the hands and gun over GTA's minimap. 0 = drawn over it, 1 = a faint ghost under it (default),
 ; 2 = hidden under it.
 GunOverRadar=1
@@ -230,6 +238,9 @@ EmpKills=15
 KeepKillstreaksOnDeath=0
 KillstreaksInMissions=0
 NukeInMissions=0
+; GunshipAircraft: the AC-130 and the Chopper Gunner fly GTA's Titan 250 D and Hunter around you, your view at
+; their gun (on a game without them, the Titan and the Buzzard). 0 = the camera alone.
+GunshipAircraft=1
 ; NukeKillsPlayer: the Tactical Nuke kills you too, with your vehicle (MW2's rule); 0, the default: CODV
 ; spares you.
 NukeKillsPlayer=0

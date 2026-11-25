@@ -100,8 +100,11 @@ pub struct ViewmodelSummary {
     pub models: usize,
     pub anims: usize,
     pub images: usize,
-    /// View muzzle flash effects written (`viewmodels/fx/*.cfx`).
+    /// View muzzle flash and shell eject effects written (`viewmodels/fx/*.cfx`).
     pub effects: usize,
+    /// Guns given a shell eject with its brass (`view_eject_fx`), and the brass models written.
+    pub ejects: usize,
+    pub brass_models: Vec<String>,
     pub bytes: u64,
     pub missing_images: Vec<String>,
     pub missing_models: Vec<String>,
@@ -123,8 +126,8 @@ const BODY_ZONES: [&str; 4] = ["mp_rust.ff", "mp_terminal.ff", "mp_highrise.ff",
 /// Reads the first-person meshes, animations and images the holdable guns of
 /// `table` use from the player's MW2 (`zone/english/*.ff`, `main/iw_*.iwd`)
 /// into `out/viewmodels/{models,anims,images,fx}`, and records on each gun its
-/// models, hidden tags, animation names and view muzzle flash (`gun_model`,
-/// `hand_model`, `hide_tags`, `xanim.<slot>`, `view_flash_fx`).
+/// models, hidden tags, animation names, view muzzle flash and shell eject (`gun_model`,
+/// `hand_model`, `hide_tags`, `xanim.<slot>`, `view_flash_fx`, `view_eject_fx`).
 #[cfg(feature = "import")]
 pub fn import_viewmodels(
     mw2: &std::path::Path,
@@ -151,6 +154,7 @@ pub fn import_viewmodels(
         found.weapon_hud.extend(f.weapon_hud);
         found.effects.extend(f.effects);
         found.weapon_flash.extend(f.weapon_flash);
+        found.weapon_eject.extend(f.weapon_eject);
     }
     let models: HashMap<String, &vm::Model> = found.models.iter().map(|m| (m.name.to_ascii_lowercase(), m)).collect();
     let mut want_models = BTreeSet::new();
@@ -177,6 +181,7 @@ pub fn import_viewmodels(
                 && k != "hide_tags"
                 && k != "rocket_model"
                 && k != "view_flash_fx"
+                && k != "view_eject_fx"
                 && !k.starts_with("xanim.")
         });
         // MW2's view muzzle flash (WeaponDef viewFlashEffect), with the effects its runners spawn.
@@ -197,6 +202,37 @@ pub fn import_viewmodels(
                             want_images.insert(m.color_map.to_ascii_lowercase());
                         }
                     }
+                }
+            }
+        }
+        // MW2's view shell eject (WeaponDef viewShellEjectEffect): kept when it throws a model the zones
+        // hold (the brass), with its runners' effects.
+        if let Some(fx) = found.weapon_eject.get(&row.name)
+            && found.effects.contains_key(fx)
+        {
+            let mut effects = Vec::new();
+            let mut brass = Vec::new();
+            let mut more = vec![fx.clone()];
+            while let Some(name) = more.pop() {
+                let Some(e) = found.effects.get(&name) else { continue };
+                if effects.contains(&name) || effects.len() >= 8 {
+                    continue;
+                }
+                effects.push(name);
+                for x in &e.elems {
+                    more.extend(x.runs.iter().cloned());
+                    brass.extend(x.models.iter().map(|m| m.to_ascii_lowercase()).filter(|m| models.contains_key(m)));
+                }
+            }
+            if !brass.is_empty() {
+                row.strings.push(("view_eject_fx".into(), fx.clone()));
+                summary.ejects += 1;
+                want_effects.extend(effects);
+                for m in brass {
+                    if !summary.brass_models.contains(&m) {
+                        summary.brass_models.push(m.clone());
+                    }
+                    want_models.insert(m);
                 }
             }
         }

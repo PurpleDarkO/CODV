@@ -131,7 +131,7 @@ bool Busy(std::uint32_t reward) {
     }
 }
 
-void CallIn(std::uint32_t reward, RuntimeBridge& runtime, Ped player, util::LogFn log) {
+void CallIn(std::uint32_t reward, RuntimeBridge& runtime, Ped player, const ksremote::Settings& look, util::LogFn log) {
     const std::uint32_t now = Now();
     switch (reward) {
     case CV_KS_UAV:
@@ -147,10 +147,10 @@ void CallIn(std::uint32_t reward, RuntimeBridge& runtime, Ped player, util::LogF
         EmpSweep(player);
         util::Logf(log, "CODV: EMP for %u s", ksrules::kEmpMs / 1000);
         break;
-    case CV_KS_PREDATOR: g.remote.Start(ksremote::Kind::Predator, runtime, player, log); break;
-    case CV_KS_AC130: g.remote.Start(ksremote::Kind::Ac130, runtime, player, log); break;
-    case CV_KS_CHOPPER_GUNNER: g.remote.Start(ksremote::Kind::Chopper, runtime, player, log); break;
-    case CV_KS_AIRSTRIKE: g.remote.Start(ksremote::Kind::TargetMap, runtime, player, log); break;
+    case CV_KS_PREDATOR: g.remote.Start(ksremote::Kind::Predator, runtime, player, look, log); break;
+    case CV_KS_AC130: g.remote.Start(ksremote::Kind::Ac130, runtime, player, look, log); break;
+    case CV_KS_CHOPPER_GUNNER: g.remote.Start(ksremote::Kind::Chopper, runtime, player, look, log); break;
+    case CV_KS_AIRSTRIKE: g.remote.Start(ksremote::Kind::TargetMap, runtime, player, look, log); break;
     case CV_KS_HELICOPTER: g.units.CallHelicopter(player, log); break;
     case CV_KS_SENTRY: g.units.PlaceSentry(runtime, player, log); break;
     case CV_KS_CARE_PACKAGE: g.units.DropCarePackage(player, log); break;
@@ -239,7 +239,7 @@ void Tick(RuntimeBridge& runtime, Ped player, const Frame& f, util::LogFn log) {
     CvStreakOutput out{};
     if (runtime.KillstreakStep(in, out)) {
         g.held = out.held, g.top = out.top, g.streak = out.streak;
-        if (out.activated) CallIn(out.activated, runtime, player, log);
+        if (out.activated) CallIn(out.activated, runtime, player, f.look, log);
     }
     TickEffects(player);
     runtime.KillstreakView(view);

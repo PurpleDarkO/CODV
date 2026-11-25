@@ -10,9 +10,10 @@
 //! * materials and images: the texture table and GfxImage records
 //!   `fastfile_iw4` records, joined by asset slot as `asset_material`'s link
 //!   map does;
-//! * effects (the guns' view muzzle flashes): FxEffectDef and its FxElemDefs
-//!   as `fastfile_iw4`'s `load_fx` walks them, read field by field from the
-//!   IW4 x86 layout.
+//! * effects (the guns' view muzzle flashes and shell ejects): FxEffectDef and
+//!   its FxElemDefs as `fastfile_iw4`'s `load_fx` walks them, read field by
+//!   field from the IW4 x86 layout; the models the shell ejects throw (the
+//!   brass) are captured with them.
 //!
 //! iw4L is Apache-2.0 (NOTICE).
 use crate::vm;
@@ -66,6 +67,8 @@ pub struct Found {
     pub effects: HashMap<String, vm::Effect>,
     /// Weapon name -> its view muzzle flash effect (WeaponDef viewFlashEffect); variants share it.
     pub weapon_flash: HashMap<String, String>,
+    /// Weapon name -> its view shell eject effect (WeaponDef viewShellEjectEffect); variants share it.
+    pub weapon_eject: HashMap<String, String>,
     pub skipped: Vec<String>,
     /// The character animation sources (playeranim::MULTIPLAYER_ANIMTREE_PATH,
     /// playeranim::PLAYERANIM_SCRIPT_PATH), inflated, by rawfile name.
@@ -90,6 +93,10 @@ struct Sink {
     fx_slots: HashMap<Ptr, String>,
     last_fx: Option<(String, Option<Ptr>)>,
     flash_defs: HashMap<Ptr, String>,
+    eject_defs: HashMap<Ptr, String>,
+    /// The other XModels (not first person, not a body), by lower-case name: captured after the walk
+    /// when an effect's model element throws them (the brass).
+    other_models: HashMap<String, XModelGeometry>,
     found: Found,
     /// XModel names by asset slot, for weapons naming models loaded earlier.
     xmodel_names: std::collections::HashMap<Ptr, Ptr>,
@@ -296,8 +303,20 @@ impl Sink {
         Some(self.materials[*i].material.clone())
     }
 
-    /// One FxElemDef (IW4 x86: 252 bytes; asset_iw4::size::FX_ELEM_DEF).
+    /// The effect a weapon's FX slot names (captured in this zone, or an alias of one).
+    fn fx_at(&self, s: &ZoneStream<'_>, slot: Ptr) -> Option<String> {
+        self.fx_slots.get(&slot).cloned().or_else(|| match s.ptr_at(slot, 0) {
+            Ok(ZonePtr::Offset(p)) => self.fx_slots.get(&p).or_else(|| self.fx_slots.get(&s.resolve_alias(p))).cloned(),
+            _ => None,
+        })
+    }
+
+    /// One FxElemDef (IW4 x86: 252 bytes, asset_iw4::size::FX_ELEM_DEF; x64: 288). Its fields up to
+    /// the velocity samples are the same in both layouts; from there on the x64 offsets are the ones
+    /// iw4L's loader walks (`load_fx_elem_def`).
     fn fx_elem(&self, s: &ZoneStream<'_>, p: Ptr, category: u8) -> Option<vm::FxElem> {
+        let (vel_at, vis_at, visuals_at) = (s.layout(180, 184), s.layout(184, 192), s.layout(188, 200));
+        let visual_stride = s.layout(sz::FX_ELEM_VISUALS, 8);
         let f = |off: usize| s.f32_at(p, off).unwrap_or(0.0);
         let i = |off: usize| s.i32_at(p, off).unwrap_or(0);
         let range = |off: usize| [f(off), f(off + 4)];
@@ -311,7 +330,7 @@ impl Sink {
             _ => None,
         };
         let mut motion = Vec::new();
-        if let Some(a) = array(180) {
+        if let Some(a) = array(vel_at) {
             for k in 0..vel_count {
                 let v = |off: usize| {
                     let b = k * sz::FX_ELEM_VEL_STATE_SAMPLE + off;
@@ -330,7 +349,7 @@ impl Sink {
             }
         }
         let mut visuals = Vec::new();
-        if let Some(a) = array(184) {
+        if let Some(a) = array(vis_at) {
             for k in 0..vis_count {
                 let one = |off: usize| {
                     let b = k * sz::FX_ELEM_VIS_STATE_SAMPLE + off;
@@ -353,11 +372,11 @@ impl Sink {
         let mut materials = Vec::new();
         if vm_sprite(kind) {
             if visual_count > 1 {
-                if let Some(a) = array(188) {
-                    materials.extend((0..visual_count).filter_map(|k| self.material_at(s, a.at(k * 4))));
+                if let Some(a) = array(visuals_at) {
+                    materials.extend((0..visual_count).filter_map(|k| self.material_at(s, a.at(k * visual_stride))));
                 }
             } else if visual_count == 1 {
-                materials.extend(self.material_at(s, p.at(188)));
+                materials.extend(self.material_at(s, p.at(visuals_at)));
             }
         }
         let mut runs = Vec::new();
@@ -367,11 +386,32 @@ impl Sink {
                 _ => None,
             };
             if visual_count > 1 {
-                if let Some(a) = array(188) {
-                    runs.extend((0..visual_count).filter_map(|k| name(a.at(k * 4))));
+                if let Some(a) = array(visuals_at) {
+                    runs.extend((0..visual_count).filter_map(|k| name(a.at(k * visual_stride))));
                 }
             } else if visual_count == 1 {
-                runs.extend(name(p.at(188)));
+                runs.extend(name(p.at(visuals_at)));
+            }
+        }
+        let mut models = Vec::new();
+        if kind == vm::fx_kind::MODEL {
+            // The visual is an XModel: its name is the header's first field.
+            let name = |slot: Ptr| {
+                let name = self.xmodel_names.get(&slot).copied().or_else(|| match s.ptr_at(slot, 0) {
+                    Ok(ZonePtr::Offset(q)) => match s.ptr_at(s.resolve_alias(q), 0) {
+                        Ok(ZonePtr::Offset(n)) => Some(s.resolve_alias(n)),
+                        _ => None,
+                    },
+                    _ => None,
+                });
+                ascii_name(s, name)
+            };
+            if visual_count > 1 {
+                if let Some(a) = array(visuals_at) {
+                    models.extend((0..visual_count).filter_map(|k| name(a.at(k * visual_stride))));
+                }
+            } else if visual_count == 1 {
+                models.extend(name(p.at(visuals_at)));
             }
         }
         let mut atlas = [0u8; 6];
@@ -400,8 +440,9 @@ impl Sink {
             visuals,
             materials,
             runs,
-            sort_order: s.u8_at(p, 248).unwrap_or(0),
-            lighting_frac: s.u8_at(p, 249).unwrap_or(0),
+            models,
+            sort_order: s.u8_at(p, s.layout(248, 280)).unwrap_or(0),
+            lighting_frac: s.u8_at(p, s.layout(249, 281)).unwrap_or(0),
         })
     }
 
@@ -421,9 +462,10 @@ impl Sink {
         Some(self.images.len() - 1)
     }
 
-    fn capture_model(&mut self, s: &ZoneStream<'_>, g: XModelGeometry) -> Result<Option<vm::Model>, String> {
+    /// `any`: whatever its name (a shell eject's brass); else first-person and body models only.
+    fn capture_model(&mut self, s: &ZoneStream<'_>, g: XModelGeometry, any: bool) -> Result<Option<vm::Model>, String> {
         let Some(name) = ascii_name(s, g.name) else { return Ok(None) };
-        if !is_fpv_model(&name) && !is_body_model(&name) {
+        if !any && !is_fpv_model(&name) && !is_body_model(&name) {
             return Ok(None);
         }
         let e = |what: &str| format!("{name}: {what}");
@@ -655,9 +697,13 @@ impl AssetLinkSink for Sink {
             }
             AssetType::XModel => {
                 if let Some(g) = s.xmodel() {
-                    match self.capture_model(s, g) {
+                    match self.capture_model(s, g, false) {
                         Ok(Some(m)) => self.found.models.push(m),
-                        Ok(None) => {}
+                        Ok(None) => {
+                            if let Some(name) = ascii_name(s, g.name) {
+                                self.other_models.insert(name.to_ascii_lowercase(), g);
+                            }
+                        }
                         Err(why) => self.found.skipped.push(why),
                     }
                 }
@@ -753,14 +799,7 @@ impl AssetLinkSink for Sink {
                 if let Some(g) = s.weapon()
                     && let Some(name) = ascii_name(s, g.name)
                 {
-                    let fx = g.view_flash_slot.and_then(|slot| {
-                        self.fx_slots.get(&slot).cloned().or_else(|| match s.ptr_at(slot, 0) {
-                            Ok(ZonePtr::Offset(p)) => {
-                                self.fx_slots.get(&p).or_else(|| self.fx_slots.get(&s.resolve_alias(p))).cloned()
-                            }
-                            _ => None,
-                        })
-                    });
+                    let fx = g.view_flash_slot.and_then(|slot| self.fx_at(s, slot));
                     let fx = match fx {
                         Some(fx) => {
                             if let Some(def) = g.weap_def {
@@ -771,7 +810,21 @@ impl AssetLinkSink for Sink {
                         None => g.weap_def.and_then(|d| self.flash_defs.get(&d).cloned()),
                     };
                     if let Some(fx) = fx {
-                        self.found.weapon_flash.insert(name, fx);
+                        self.found.weapon_flash.insert(name.clone(), fx);
+                    }
+                    // The shell eject, the same way (its brass flies from tag_brass).
+                    let fx = g.view_shell_eject_slot.and_then(|slot| self.fx_at(s, slot));
+                    let fx = match fx {
+                        Some(fx) => {
+                            if let Some(def) = g.weap_def {
+                                self.eject_defs.insert(def, fx.clone());
+                            }
+                            Some(fx)
+                        }
+                        None => g.weap_def.and_then(|d| self.eject_defs.get(&d).cloned()),
+                    };
+                    if let Some(fx) = fx {
+                        self.found.weapon_eject.insert(name, fx);
                     }
                 }
                 if let Some(g) = s.weapon()
@@ -806,6 +859,12 @@ impl AssetLinkSink for Sink {
         if ty == AssetType::Fx {
             if let Some(name) = self.fx_slots.get(&target).cloned() {
                 self.fx_slots.insert(slot, name);
+            }
+            return Ok(());
+        }
+        if ty == AssetType::XModel {
+            if let Some(&name) = self.xmodel_names.get(&target) {
+                self.xmodel_names.insert(slot, name);
             }
             return Ok(());
         }
@@ -852,12 +911,12 @@ impl AssetLinkSink for Sink {
                 } else {
                     2
                 };
-                if let Some(e) = self.fx_elem(s, arr.at(k * sz::FX_ELEM_DEF), category) {
+                if let Some(e) = self.fx_elem(s, arr.at(k * s.layout(sz::FX_ELEM_DEF, 288)), category) {
                     elems.push(e);
                 }
             }
         }
-        let looping_life_ms = s.i32_at(g.header, 12).unwrap_or(0);
+        let looping_life_ms = s.i32_at(g.header, s.layout(12, 16)).unwrap_or(0);
         self.found.effects.insert(name.clone(), vm::Effect { name: name.clone(), looping_life_ms, elems });
         self.last_fx = Some((name, Some(g.header)));
         Ok(())
@@ -928,10 +987,29 @@ pub fn capture(image: &[u8]) -> Result<Found, String> {
         fx_slots: HashMap::new(),
         last_fx: None,
         flash_defs: HashMap::new(),
+        eject_defs: HashMap::new(),
+        other_models: HashMap::new(),
         xmodel_names: HashMap::new(),
         found: Found::default(),
     };
     fastfile_iw4::load_zone(&mut stream, &mut sink).map_err(|e| format!("zone walk stopped: {e:?}"))?;
+    // The models the effects' model elements throw (the shell ejects' brass), from this zone.
+    let mut thrown: Vec<String> =
+        sink.found.effects.values().flat_map(|e| e.elems.iter().flat_map(|x| x.models.iter())).cloned().collect();
+    thrown.sort_unstable_by_key(|n| n.to_ascii_lowercase());
+    thrown.dedup_by_key(|n| n.to_ascii_lowercase());
+    for name in thrown {
+        let key = name.to_ascii_lowercase();
+        if sink.found.models.iter().any(|m| m.name.eq_ignore_ascii_case(&key)) {
+            continue;
+        }
+        let Some(g) = sink.other_models.get(&key).copied() else { continue };
+        match sink.capture_model(&stream, g, true) {
+            Ok(Some(m)) => sink.found.models.push(m),
+            Ok(None) => {}
+            Err(why) => sink.found.skipped.push(why),
+        }
+    }
     for img in std::mem::take(&mut sink.images) {
         sink.found.images.entry(img.name.clone()).or_insert(img);
     }

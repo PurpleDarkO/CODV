@@ -341,7 +341,10 @@ struct CvVmFrame {
     std::uint32_t bone_count;
     float ads;          // ADS fraction 0..1
     float ads_zoom_fov; // the weapon's ADS zoom FOV (MW2 horizontal degrees at 4:3)
-    std::uint32_t reserved[2];
+    // The first bone of the brass copies (MW2's shell ejects; 0 none): bones from it to the end are the
+    // brass, collapsed by the host when shell ejects are off. Was reserved (an older runtime sends 0).
+    std::uint32_t brass_bone;
+    std::uint32_t reserved;
 };
 struct CvVmMeshInfo {
     std::uint32_t size;

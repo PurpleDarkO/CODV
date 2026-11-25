@@ -16,6 +16,10 @@ use xmodel_runtime::AnimClip;
 
 /// Meshes kept for the host (the loadout, the frag, the knife and a few past guns).
 const MESHES: usize = 8;
+/// Copies of each brass model on the rig: the shells in flight at once (the oldest gives its copy up).
+const BRASS_COPIES: usize = 10;
+/// Brass models per gun at most (a belt-fed gun throws a shell and a link).
+const BRASS_MODELS: usize = 2;
 
 /// The imported files, decoded once and shared with the prewarm thread
 /// (decoding a weapon's models and animations takes a few hundred ms: done
@@ -55,6 +59,14 @@ impl Disk {
         locked(&self.clips).entry(key).or_insert(c).clone()
     }
 
+    /// The brass a gun's shell eject throws (lower-case XModel names), at most `BRASS_MODELS`.
+    fn brass(&self, row: &Row) -> Vec<String> {
+        match row.s("view_eject_fx") {
+            "" => Vec::new(),
+            fx => flash::models(&self.dir.join("fx"), fx).into_iter().take(BRASS_MODELS).collect(),
+        }
+    }
+
     /// Decodes everything a weapon's rig needs (errors show when it is built).
     fn warm(&self, weapon: &str) {
         let Some(row) = self.rows.get(weapon) else { return };
@@ -62,6 +74,9 @@ impl Disk {
         let _ = self.model(row.s("gun_model"));
         if !row.s("rocket_model").is_empty() {
             let _ = self.model(row.s("rocket_model"));
+        }
+        for m in self.brass(row) {
+            let _ = self.model(&m);
         }
         for s in 0..v::SLOTS {
             let n = row.s(&format!("xanim.{s}"));
@@ -91,7 +106,11 @@ impl Shared {
         };
         for w in weapons {
             let Some(row) = self.0.rows.get(w) else { continue };
-            for model in [row.s("hand_model"), row.s("gun_model"), row.s("rocket_model")] {
+            let brass = self.0.brass(row);
+            let models = [row.s("hand_model"), row.s("gun_model"), row.s("rocket_model")]
+                .into_iter()
+                .chain(brass.iter().map(String::as_str));
+            for model in models {
                 if model.is_empty() {
                     continue;
                 }
@@ -132,6 +151,12 @@ pub struct Viewmodels {
     flashes: Flashes,
     flash_tag: Option<usize>,
     flash_fx: String,
+    /// MW2's view shell ejects: the held gun's (from its tag_brass) and the rig bones of its brass
+    /// copies (per brass model: the first copy's bone).
+    ejects: Flashes,
+    eject_tag: Option<usize>,
+    eject_fx: String,
+    brass: Vec<(String, usize)>,
 }
 
 impl Viewmodels {
@@ -150,6 +175,7 @@ impl Viewmodels {
             .collect::<HashMap<_, _>>();
         log(&format!("mw2: viewmodels for {} weapons in {}", rows.len(), dir.display()));
         let flashes = Flashes::new(dir.join("fx"));
+        let ejects = Flashes::for_models(dir.join("fx"));
         Some(Viewmodels {
             disk: Arc::new(Disk { dir, rows, models: Mutex::default(), clips: Mutex::default() }),
             rig: None,
@@ -162,6 +188,10 @@ impl Viewmodels {
             flashes,
             flash_tag: None,
             flash_fx: String::new(),
+            ejects,
+            eject_tag: None,
+            eject_fx: String::new(),
+            brass: Vec::new(),
         })
     }
 
@@ -180,7 +210,8 @@ impl Viewmodels {
         });
     }
 
-    fn build(&self, id: u32, name: &str, dressed_as: &str) -> Result<Rig, String> {
+    /// The rig, and its brass copies (per brass model: the first copy's bone).
+    fn build(&self, id: u32, name: &str, dressed_as: &str) -> Result<(Rig, Vec<(String, usize)>), String> {
         let disk = &self.disk;
         let row = disk.rows.get(name).ok_or_else(|| format!("{name}: no viewmodel was imported"))?;
         // An underbarrel weapon shows its gun's parts (the gun's hidden tags: its sights, its silencer).
@@ -199,7 +230,7 @@ impl Viewmodels {
             "" => None,
             n => disk.model(n).ok(),
         };
-        Rig::build_with_rocket(
+        let mut rig = Rig::build_with_rocket(
             id,
             &hands,
             &gun,
@@ -208,7 +239,18 @@ impl Viewmodels {
             clips,
             Timers::from_row(row),
             PlacementFacts::from_row(row),
-        )
+        )?;
+        // The brass its shell eject throws, when the gun has a tag_brass to throw it from.
+        let mut brass = Vec::new();
+        if rig.bone("tag_brass").is_some() {
+            for m in disk.brass(row) {
+                let Ok(model) = disk.model(&m) else { continue };
+                if let Some(first) = rig.add_copies(&model, BRASS_COPIES) {
+                    brass.push((m, first));
+                }
+            }
+        }
+        Ok((rig, brass))
     }
 
     /// After the weapon's tick: (re)build the rig for the held weapon, then
@@ -228,6 +270,7 @@ impl Viewmodels {
         if id == 0 {
             self.rig = None;
             self.flashes.clear();
+            self.ejects.clear();
             return;
         }
         if self.rig.as_ref().is_none_or(|r| r.weapon != id) {
@@ -236,12 +279,19 @@ impl Viewmodels {
                 return;
             }
             match self.build(id, name, dressed_as) {
-                Ok(rig) => {
+                Ok((rig, brass)) => {
                     let row = self.disk.rows.get(name);
                     let silenced = name.contains("silencer");
                     self.flash_tag =
                         silenced.then(|| rig.bone("tag_flash_silenced")).flatten().or_else(|| rig.bone("tag_flash"));
                     self.flash_fx = row.map_or(String::new(), |r| r.s("view_flash_fx").to_owned());
+                    self.eject_tag = rig.bone("tag_brass").filter(|_| !brass.is_empty());
+                    self.eject_fx = if self.eject_tag.is_some() {
+                        row.map_or(String::new(), |r| r.s("view_eject_fx").to_owned())
+                    } else {
+                        String::new()
+                    };
+                    self.brass = brass;
                     let known = self.weapon_mesh.get(&id).copied().filter(|m| self.meshes.iter().any(|(k, _)| k == m));
                     if let Some(m) = known {
                         self.mesh_id = m;
@@ -256,10 +306,16 @@ impl Viewmodels {
                         self.meshes.push((self.mesh_id, Arc::clone(rig.mesh())));
                         self.weapon_mesh.insert(id, self.mesh_id);
                         log(&format!(
-                            "mw2: viewmodel {name}: {} bones, {} triangles, {} draws",
+                            "mw2: viewmodel {name}: {} bones, {} triangles, {} draws{}",
                             rig.bone_count(),
                             rig.mesh().indices.len() / 3,
-                            rig.mesh().draws.len()
+                            rig.mesh().draws.len(),
+                            if self.brass.is_empty() {
+                                String::new()
+                            } else {
+                                let names: Vec<&str> = self.brass.iter().map(|(m, _)| m.as_str()).collect();
+                                format!(", shell eject {} ({})", self.eject_fx, names.join(", "))
+                            }
                         ));
                         self.rig = Some(rig);
                     }
@@ -273,17 +329,50 @@ impl Viewmodels {
         }
         if let Some(rig) = self.rig.as_mut() {
             rig.tick(player, frame, dt);
-            let tags: Vec<usize> = self.flash_tag.into_iter().collect();
+            let tags: Vec<usize> = [self.flash_tag.unwrap_or(0), self.eject_tag.unwrap_or(0)].into();
             let (bones, placed) = rig.skin_with_tags(&tags);
             self.bones = bones;
-            // A shot of the gun in hand (not a grenade's throw view) flashes at its muzzle.
-            let fire = (frame.fired && frame.offhand_view.is_none() && !self.flash_fx.is_empty())
-                .then_some(self.flash_fx.as_str());
+            // A shot of the gun in hand (not a grenade's throw view) flashes at its muzzle and throws its
+            // brass from the ejection port.
+            let shot = frame.fired && frame.offhand_view.is_none();
+            let fire = (shot && !self.flash_fx.is_empty()).then_some(self.flash_fx.as_str());
+            let eject = (shot && !self.eject_fx.is_empty()).then_some(self.eject_fx.as_str());
             let ps = &player.ps;
             let eye = [ps.origin[0], ps.origin[1], ps.origin[2] + ps.view_height_current];
             let view = flash::view_to_world(eye, ps.viewangles);
-            self.flashes.tick(dt * 1000.0, placed.first().copied(), view, fire, log);
+            let flash_at = self.flash_tag.and(placed.first().copied());
+            let eject_at = self.eject_tag.and(placed.get(1).copied());
+            self.flashes.tick(dt * 1000.0, flash_at, view, fire, log);
+            self.ejects.set_floor(Some(ps.origin[2]));
+            self.ejects.tick(dt * 1000.0, eject_at, view, eject, log);
+            self.place_brass();
         }
+    }
+
+    /// The brass in flight onto its copies' bones (newest first; copies left over stay collapsed).
+    fn place_brass(&mut self) {
+        let thrown = self.ejects.thrown();
+        for (model, first) in &self.brass {
+            let mut slot = 0;
+            for t in thrown.iter().rev().filter(|t| &*t.model == model.as_str()) {
+                if slot >= BRASS_COPIES {
+                    break;
+                }
+                if let Some(b) = self.bones.get_mut(first + slot) {
+                    let c = t.at.to_cols_array_2d();
+                    *b = [
+                        c[0][0], c[1][0], c[2][0], c[3][0], c[0][1], c[1][1], c[2][1], c[3][1], c[0][2], c[1][2],
+                        c[2][2], c[3][2],
+                    ];
+                }
+                slot += 1;
+            }
+        }
+    }
+
+    /// The first bone of the brass copies (the host collapses them when shell ejects are off); 0: none.
+    pub fn brass_bone(&self) -> u32 {
+        self.brass.iter().map(|(_, b)| *b as u32).min().unwrap_or(0)
     }
 
     /// The muzzle flash this frame: sprites in the view model's space and lights in MW2's world.
@@ -301,6 +390,7 @@ impl Viewmodels {
         self.rig = None;
         self.bones.clear();
         self.flashes.clear();
+        self.ejects.clear();
     }
 
     /// (mesh id, bones, ADS fraction, ADS zoom FOV) of the last tick.

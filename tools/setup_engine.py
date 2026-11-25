@@ -28,12 +28,10 @@ INI = 'CodVLegacy.ini'
 TEMPLATE = Path(__file__).with_name('CodVLegacy.ini.template')
 NEW, OLD = '.codv-new', '.codv-old'
 DATA = 'CODV'
-# INI keys the in-game menu saves: a reinstall keeps the player's value.
-KEEP_KEYS = ['StartEnabled', 'ToggleKey', 'ToggleChord', 'Primary', 'Secondary', 'GiveLoadout', 'RecoilScale', 'Damage', 'Tracers',
-             'FireMode', 'RegenHealth', 'QuickJump', 'ForceFirstPerson', 'Crosshair', 'Hitmarker', 'HitSounds',
-             'AmmoCounter', 'DamageFlash', 'InMissions', 'Debug', 'VerboseLog', 'MenuChord', 'StrictVersion', 'Runtime',
-             'DataRoot', 'SoundGainDb', 'Mw2Primary', 'Mw2Secondary', 'Mw2PrimaryAttach', 'Mw2PrimaryAttach2', 'Mw2SecondaryAttach', 'Mw2SecondaryAttach2', 'AmmoScale', 'Frags', 'Lethal', 'Tactical', 'JumpHeight', 'SprintTime', 'SprintRecharge', 'NumberKeys', 'RandomLoadout', 'WeaponSets', 'Mw2Missiles', 'Mw2Hud',
-             'Killstreaks', 'AllKillstreaks', 'SpacedKillstreaks', 'Scavenger', 'Killstreak1', 'Killstreak2', 'Killstreak3', 'EmpKills', 'KeepKillstreaksOnDeath', 'KillstreaksInMissions', 'NukeInMissions', 'NukeKillsPlayer', 'FallDamage', 'Slide', 'SprintSpeed', 'StaminaBar', 'JumpSlowdown', 'ReloadSprint', 'PoliceJuggernauts', 'JuggernautCinematics', 'AutoVault', 'MantleSpeed', 'HighClimb', 'Dive', 'SmoothCollision', 'SlideSpeed', 'SlideTime', 'VaultMinHeight', 'ClimbMaxHeight', 'Mw2Footsteps', 'Lean', 'AutoLadders', 'KillCounter', 'Mw2Blood', 'ViewmodelLight', 'GunOverRadar', 'MinimapFollowsView', 'KillFeedback', 'ThirdPerson', 'ThirdPersonKey']
+# A reinstall keeps the player's value of every key the template still has (what the in-game menu
+# saved, or what they edited by hand); a key the template dropped goes with it. RESET_KEYS: keys
+# whose default changed on purpose in this version, set back to the template's value once.
+RESET_KEYS = []
 
 
 class SetupError(Exception):
@@ -123,7 +121,7 @@ def render_ini(placeholders, old_ini):
         s = line.strip()
         if s and s[0] not in ';#[' and '=' in s:
             k = s.split('=', 1)[0].strip()
-            if k in KEEP_KEYS and k in old:
+            if k in old and k not in RESET_KEYS:
                 line = f'{k}={old[k]}'
         lines.append(line)
     return '\n'.join(lines) + '\n'

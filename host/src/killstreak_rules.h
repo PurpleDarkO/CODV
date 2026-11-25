@@ -172,12 +172,45 @@ inline constexpr std::uint32_t kChopperMs = 40000;
 inline constexpr Gun kChopperGun = {"cobra_player_minigun_mp", 79, 0, 0, 128.0f, 120.0f, 4000.0f, 40.0f,
                                     "weap_chopgunner_20mm_fire_plr", nullptr};
 inline constexpr float kChopperRadius = 45.0f, kChopperHeight = 40.0f, kChopperTurnSeconds = 40.0f;
-// The orbit's camera position: `t` seconds in, a full turn every `turn` seconds.
+// The orbit's angle (degrees from east, counter-clockwise): `t` seconds in, a full turn every `turn` seconds.
+inline float OrbitAngle(float startDeg, float t, float turn) {
+    return startDeg + 360.0f * t / turn;
+}
+// The orbit's camera position at that angle.
 inline void Orbit(const float centre[3], float radius, float height, float startDeg, float t, float turn, float out[3]) {
-    const float a = (startDeg + 360.0f * t / turn) * 3.14159265f / 180.0f;
+    const float a = OrbitAngle(startDeg, t, turn) * 3.14159265f / 180.0f;
     out[0] = centre[0] + radius * std::cos(a);
     out[1] = centre[1] + radius * std::sin(a);
     out[2] = centre[2] + height;
+}
+
+// The aircraft the gunner rides, drawn on the same orbit (CODV's: MW2 draws none for the player):
+// GTA's Titan 250 D (an AC-130U gunship, guns on its left) for the AC-130 and its Hunter (an attack
+// helicopter, a chin gun) for the Chopper Gunner. Counter-clockwise, its left side faces the centre,
+// as MW2's AC-130 turns. The camera sits at the gun: `side` metres left of the aircraft's middle,
+// `ahead` metres forward and `below` metres down; the aircraft banks `bank` degrees into the turn.
+struct Craft {
+    float side, ahead, below, bank;
+};
+inline constexpr Craft kAc130Craft = {2.6f, 0.0f, 1.6f, 10.0f};
+inline constexpr Craft kChopperCraft = {0.0f, 5.5f, 1.5f, 8.0f};
+struct CraftPose {
+    float at[3];
+    float heading; // GTA's (degrees, north 0, west 90)
+    float roll;    // GTA's rotation y (degrees); negative lowers the left wing
+};
+inline CraftPose PlaceCraft(const float cam[3], float orbitDeg, const Craft& c) {
+    const float a = orbitDeg * 3.14159265f / 180.0f;
+    // Flying along the orbit: forward is its tangent, right points away from the centre.
+    const float fwd[2] = {-std::sin(a), std::cos(a)}, right[2] = {std::cos(a), std::sin(a)};
+    CraftPose p{};
+    p.at[0] = cam[0] + right[0] * c.side - fwd[0] * c.ahead;
+    p.at[1] = cam[1] + right[1] * c.side - fwd[1] * c.ahead;
+    p.at[2] = cam[2] + c.below;
+    float h = std::fmod(orbitDeg, 360.0f);
+    p.heading = h < 0.0f ? h + 360.0f : h;
+    p.roll = -c.bank;
+    return p;
 }
 
 // Attack Helicopter (_helicopter.gsc): 60 s; targets within heli_visual_range 3500 units, a new

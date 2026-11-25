@@ -68,6 +68,7 @@ menu) hands everything back to GTA. Each switch-on brings new random MW2 guns (b
 | Weapon groups: primaries / secondaries / snipers / launchers (again: the group's next gun) | 1 / 2 / 3 / 5 | |
 | Killstreak | 4 | D-pad right |
 | Lean left / right (hold) | Q / E | |
+| Flashlight on / off (`FlashlightKey`) | H | |
 | In a shop (Ammu-Nation, clothes, barber, tattoo, masks): GTA has you, then its "press E" | hold E, then E | hold D-pad right, then D-pad right |
 | Take a ladder | walk into it | Y |
 | Third-person camera (`ThirdPersonKey=1`; off by default) | C | Back |
@@ -101,7 +102,9 @@ MW2's attachments go on the guns (menu Weapons; random guns come with random one
 extended mags, the heartbeat sensor (its screen shows the hostiles ahead) and the underbarrel grenade launcher or
 shotgun, which X (D-pad down) switches to and back, with MW2's animations and their own rounds.
 Every shot shows MW2's own muzzle flash for that gun (its flares, sparks and smoke; a silencer's is smaller) and
-lights up what is around you (`MuzzleFlash`, its brightness `MuzzleFlashStrength`).
+lights up what is around you (`MuzzleFlash`, its brightness `MuzzleFlashStrength`). It also throws the gun's
+brass from its ejection port, MW2's own shell eject for that gun (`ShellEject`). H turns a flashlight on the gun
+on and off: CODV's own, as MW2's guns have none (`FlashlightKey`, its brightness `FlashlightBrightness`).
 
 **Explosives.** G (RB) throws what you pick in the menu (`Lethal`), with MW2's own animation and HUD icon:
 the frag; the Semtex, which sticks to whatever it hits, a car or a person included, and goes off two seconds
@@ -132,8 +135,8 @@ in the top one. All ten are in play by default, one per kill count in one life:
 | 12 | **Sentry Gun**: fires at hostiles for 90 s |
 | 15 | **Precision Airstrike**: pick the target from above; two jets carpet it |
 | 18 | **Attack Helicopter**: circles you for 60 s, firing at hostiles |
-| 22 | **AC-130**: 40 s on the gunship's guns, with MW2's HUD |
-| 26 | **Chopper Gunner**: 40 s on the helicopter's turret, with MW2's HUD |
+| 22 | **AC-130**: 40 s on the gunship's guns, with MW2's HUD, from GTA's Titan 250 D circling above you |
+| 26 | **Chopper Gunner**: 40 s on the helicopter's turret, with MW2's HUD, from GTA's Hunter circling low |
 | 30 | **EMP**: the city's lights out, engines dead and aircraft down near you for 60 s |
 | 35 | **Tactical Nuke**: MW2's countdown and blast, then a long aftermath (orange sky, smoke, empty streets, no police sent for 30 s); you survive (`NukeKillsPlayer=1`: MW2's rule, it takes you too) |
 

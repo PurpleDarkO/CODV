@@ -6,6 +6,31 @@ noted with each release: a host and a runtime only work together on the same ABI
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+Runtime ABI 10, unchanged (the view model frame's first reserved field now names the brass bones; an older host
+leaves it alone). **Run the setup again** to install it: it now also imports MW2's shell eject effects and their
+models, and reads the current Steam build of MW2 (your `CodVLegacy.ini` settings are kept).
+
+### Added
+- MW2's shell casings: every shot throws the gun's brass from its ejection port (its `viewShellEjectEffect`,
+  read from your MW2 at setup, with the effect's own models), spinning and falling as MW2's effect has it, until
+  it reaches the floor. Menu HUD, `ShellEject` (on by default).
+- A flashlight on the gun, CODV's own (MW2's guns have none): H turns it on and off while MW2 drives you
+  (`FlashlightKey`; not in a killstreak's camera). Menu HUD, `FlashlightBrightness` (1 to 12, 4 by default).
+- The AC-130 and the Chopper Gunner fly a GTA aircraft on their orbit, your view at its gun: the Titan 250 D
+  (GTA's AC-130 gunship, its guns on the left, the side facing the centre) and the Hunter (its chin gun),
+  banked into the turn. Before, they were the camera alone. On a game without them, the Titan and the Buzzard.
+  Killstreaks menu, `GunshipAircraft` (on by default).
+
+### Fixed
+- No MW2 sounds with the current Steam build of MW2 (setup said "0 files"), and only part of its muzzle
+  flashes: its zones use the x64 layout, which the sound and effect readers did not follow (models and the
+  HUD already did). Both layouts now read the same sounds and effects. Run the setup again.
+- A reinstall keeps every setting of `CodVLegacy.ini`, whether the menu saved it or you edited it. Before, it
+  kept only a fixed list, and some menu options went back to their defaults: field of view, mouse sensitivity,
+  invert look, MW2 movement, body pose and the muzzle flash options, among others.
+
 ## [0.5.0] - 2026-11-21
 
 Runtime ABI 10, unchanged (the runtime's additions are optional options and requests). **Run the setup again**
@@ -296,7 +321,8 @@ First public release. Runtime ABI 10.
 - CODV's own missiles have no in-flight sound yet.
 - GTA V Enhanced and GTA Online are not supported.
 
-[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/PurpleDarkO/CODV/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/PurpleDarkO/CODV/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/PurpleDarkO/CODV/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/PurpleDarkO/CODV/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/PurpleDarkO/CODV/compare/v0.3.0...v0.3.1

@@ -18,6 +18,7 @@
 #include "juggernaut_rules.h"
 #include "lifecycle_rules.h"
 #include "equipment_rules.h"
+#include "flashlight_rules.h"
 #include "tactical_rules.h"
 #include "tracer_rules.h"
 #include "heartbeat_rules.h"
@@ -144,6 +145,40 @@ static void ControlPolicy() {
         CHECK(lifecycle::Unsettled(f, 2000, 3000, still) && !lifecycle::Unsettled(f, 16, lifecycle::kSettleMaxMs, still));
         f.collision = true, f.moved = 5.0f, f.inVehicle = true; // a helicopter flying on: nothing to wait for
         CHECK(!lifecycle::Unsettled(f, 16, 100, still));
+    }
+    // The gunships' aircraft on the orbit: heading along its tangent (counter-clockwise), the camera at
+    // the gun on the aircraft's left (the centre's side), the aircraft banked into the turn.
+    {
+        const float cam[3] = {100.0f, 0.0f, 190.0f};
+        const ksrules::CraftPose p = ksrules::PlaceCraft(cam, 0.0f, ksrules::kAc130Craft);
+        CHECK(Near(p.heading, 0.0f) && Near(p.roll, -ksrules::kAc130Craft.bank));
+        // At 0 degrees it flies north; right is east, away from the centre: the aircraft is east of the gun.
+        CHECK(Near(p.at[0], 100.0f + ksrules::kAc130Craft.side) && Near(p.at[1], 0.0f, 1e-3f) &&
+              Near(p.at[2], 190.0f + ksrules::kAc130Craft.below));
+        // A quarter turn on: it flies west (GTA heading 90), its middle north of the gun.
+        const float north[3] = {0.0f, 100.0f, 190.0f};
+        const ksrules::CraftPose q = ksrules::PlaceCraft(north, 90.0f, ksrules::kAc130Craft);
+        CHECK(Near(q.heading, 90.0f) && Near(q.at[0], 0.0f, 1e-3f) && Near(q.at[1], 100.0f + ksrules::kAc130Craft.side));
+        // The chopper's chin gun is ahead of its middle: the aircraft sits behind the camera.
+        const ksrules::CraftPose c = ksrules::PlaceCraft(cam, 0.0f, ksrules::kChopperCraft);
+        CHECK(Near(c.at[0], 100.0f, 1e-3f) && Near(c.at[1], -ksrules::kChopperCraft.ahead));
+        CHECK(Near(ksrules::PlaceCraft(cam, -30.0f, ksrules::kAc130Craft).heading, 330.0f) &&
+              Near(ksrules::PlaceCraft(cam, 400.0f, ksrules::kAc130Craft).heading, 40.0f, 1e-3f));
+        CHECK(Near(ksrules::OrbitAngle(-90.0f, 35.0f, 70.0f), 90.0f));
+    }
+    // CODV's flashlight: GTA's camera rotation to its forward (yaw 0 looks along +y, 90 along -x, pitch up
+    // positive); it starts a little ahead of the camera, to the right and below; the key flips it only
+    // while MW2 drives the player.
+    {
+        const flashlight::V3 f = flashlight::Forward(0.0f, 0.0f), l = flashlight::Forward(0.0f, 90.0f);
+        const flashlight::V3 u = flashlight::Forward(90.0f, 0.0f);
+        CHECK(Near(f.x, 0.0f) && Near(f.y, 1.0f) && Near(f.z, 0.0f));
+        CHECK(Near(l.x, -1.0f) && Near(l.y, 0.0f, 1e-3f) && Near(u.z, 1.0f));
+        const flashlight::V3 at = flashlight::Origin({10.0f, 20.0f, 30.0f}, 0.0f, 0.0f);
+        CHECK(Near(at.x, 10.0f + flashlight::kRight) && Near(at.y, 20.0f + flashlight::kAhead) &&
+              Near(at.z, 30.0f - flashlight::kBelow));
+        CHECK(flashlight::Toggle(false, true, true) && !flashlight::Toggle(true, true, true));
+        CHECK(!flashlight::Toggle(false, true, false) && flashlight::Toggle(true, false, true));
     }
     // A mission's weapon picks MW2's slot: a sniper the sniper, a launcher the launcher, a pistol the secondary.
     CHECK(controls::SlotForGtaGroup(controls::kGroupSniper) == 3 && controls::SlotForGtaGroup(controls::kGroupHeavy) == 4);

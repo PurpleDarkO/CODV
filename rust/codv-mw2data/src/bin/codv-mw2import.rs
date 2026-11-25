@@ -33,6 +33,7 @@ fn main() -> ExitCode {
                 v.bytes as f64 / 1e6,
                 v.skipped_models
             );
+            println!("MW2 shell ejects: {} guns, brass models: {}", v.ejects, v.brass_models.join(", "));
             for m in v.missing_models.iter().take(10) {
                 println!("  no first-person model {m}");
             }
@@ -53,6 +54,9 @@ fn main() -> ExitCode {
     match codv_mw2data::import_sounds(mw2, &table, out) {
         Ok(v) => {
             println!("MW2 sounds: {} aliases, {} files ({:.0} MB)", v.aliases, v.files, v.bytes as f64 / 1e6);
+            if v.aliases > 0 && v.files == 0 {
+                println!("  no sound files: the aliases point at no sound this setup can read (please report it)");
+            }
             for m in v.missing.iter().take(10) {
                 println!("  no sound alias {m}");
             }
